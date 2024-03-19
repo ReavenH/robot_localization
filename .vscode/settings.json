@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "math_util.h": "c",
+        "apriltag.h": "c",
+        "image_u8.h": "c"
+    }
+}

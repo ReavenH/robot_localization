@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
+from scipy.spatial.transform import rotation as R
 
 
 # define the ground coordinates:
@@ -104,18 +105,18 @@ def drawGround(pose, ax, label):
     plt.pause(0.02)
 
 
-def drawRigidBody(vertices):
+def drawRigidBody(vertices, ax):
     # vertices is the 8 vertices of the robot rigid body.
     links = [[0, 1], [1, 2], [2, 3], [3, 0],
             [4, 5], [5, 6], [6, 7], [7, 4],
             [0, 4], [1, 5], [2, 6], [3, 7]]
     vertices = vertices[:3, :].T  # should be 8x3 if the rigid body is a rectangular prism.
     for link in links:
-        ax_fig0.plot3D(*zip(*vertices[link]), color="k", linewidth = 0.3)
+        ax.plot3D(*zip(*vertices[link]), color="k", linewidth = 0.3)
 
 
 class robot():
-    def __init__(self, hm, ax): # hm is the 4x4 homogeneous matrix, for different rotation orders.
+    def __init__(self, hm, ax, landmarks): # hm is the 4x4 homogeneous matrix, for different rotation orders.
         self.body_length = 0.20  # cm
         self.body_width = 0.10  # cm
         self.body_thickness = 0.03  # cm
@@ -141,6 +142,8 @@ class robot():
         self.initialEstimate = np.zeros(6).astype('float')  # init the initail estimate of pose: roll, pitch, yaw, x, y, z.
         self.updatedEstimate = np.zeros(6).astype('float')
         self.ax = ax  # the plot axis.
+        self.cam2body = np.array([0, 0, 0, 0, 0, 0.10])  # in the camera frame.
+        self.landmarks = landmarks  # nx7 array.
 
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
@@ -150,12 +153,22 @@ class robot():
         drawGround(self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]), self.ax, "Dog")
         # update the rigid body vertices.
         self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
-        drawRigidBody(self.body_verticesGround)
+        drawRigidBody(self.body_verticesGround, self.ax)
 
-    def perceptionUpdate(self, odo, mea):
-        # TODO: transform the visual measurement from camera frame to the rigid body frame.
-        self.odometry = odo
-        self.measurement = mea
+    def measurementUpdate(self, homo, tagID):
+        # TODO: how to handle multiple tags.
+        # homo is the homogeneous matrix returned by the apriltag detector.
+        bodyPoseInTagFrame = np.dot(homo, self.hm(*self.cam2body[:3], self.cam2body[3:]))
+        targetTagPose = self.landmarks[self.landmarks[:, 0] == tagID, 1:]
+        poseGround = np.dot(self.hm(*targetTagPose[:3], targetTagPose[3:]), bodyPoseInTagFrame)
+        rotGround = R.from_matrix(poseGround[:3, :3])
+        translation = poseGround[:3, -1]
+        # for now, let the initial estimate equal to the measurement.
+        self.initialEstimate[:3] = rotGround.as_euler('zyx', degrees = True)
+        self.initialEstimate[3:] = translation
+
+    def odometryUpdate(self, dx, dyaw):
+        pass
 
     def controlUpdate(self, ctrl):
         self.control = ctrl
@@ -164,6 +177,12 @@ class robot():
         translation = np.array([[self.control[0], 0.0, 0.0, 1]]).T  # in the rigid body frame
         self.initialEstimate[3:] = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(translation).flatten()[:-1]  # x, y, z in the world frame.
         self.initialEstimate[2] = self.updatedEstimate[2] + self.control[1]  # only change yaw.
+
+    def brickPosePropose(self):
+        # TODO: generate a proposal for brick position, to be passed to the brick class.
+        brickPoseBodyFrame = np.array([0, 0, 0, 0, 0, 0])  # ignore the actuation mechanism.
+        poseProposal = (self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:])).dot(brickPoseBodyFrame)
+        
 
 
 class landmarks():
@@ -194,11 +213,23 @@ class brickMap():
                                        [0.5 * self.brickThickness, 0.5 * self.brickThickness, 0.5 * self.brickThickness, 0.5 * self.brickThickness, 
                                         - 0.5 * self.brickThickness, - 0.5 * self.brickThickness, - 0.5 * self.brickThickness, - 0.5 * self.brickThickness],
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
-        self.map = np.zeros(6).astype('float')  # to store the poses of the bricks as maps.
+        # self.map = np.zeros(6).astype('float')  # to store the poses of the bricks as maps.
+        self.map = []  # to utilize the append attribute of lists. len = No. of bricks.
 
-    def place(self, pose):
+    def place(self, pose):  # pose is a list len = 6.
         # TODO: detect collision and layer.
-        pass
+        if self._viabilityDetect(pose) != True:  # if the pose of brick is viable.
+            self.map.append(pose)
+            drawGround(hmRPYG(*pose[:3], pose[3:]), self.ax, "Brick ".join(str(len(self.map + 1))))  # len(list) returns the rows of a list (first dim).
+            drawRigidBody(hmRPYG(*pose[:3], pose[3:]).dot(self.brickVertices), self.ax)
+            return True  #  to be passed to the robot class.
+        else:
+            print("Invalid Brick Pose")
+            return False  #  to be passed to the robot class.
+
+    def _viabilityDetect(self, pose) -> bool:  # pose is a list len = 6.
+        # TODO: the rule check function before placing bricks.
+        return True
 
 
 if __name__ == "__main__":
