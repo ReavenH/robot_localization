@@ -2,7 +2,10 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from scipy.spatial.transform import rotation as R
-
+import threading
+import apriltag_video_picamera1 as avp
+import time
+import calibrationfunc as cf
 
 # define the ground coordinates:
 # X: pointing forwards; Y: pointing left; Z: pointing upwards
@@ -231,6 +234,9 @@ class brickMap():
         # TODO: the rule check function before placing bricks.
         return True
 
+# ---- initiate a apriltag detetcion threading func ----
+def apriltagDetectionThreadFunc():
+	avp.apriltag_video(print_log = True, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs)
 
 if __name__ == "__main__":
     # ---- Create a figure object ----
@@ -248,7 +254,8 @@ if __name__ == "__main__":
     poseTags = np.array([[13, 90, -90, 0, 0.75, 0.20, 0.13],
                          [14, 90, -90, 0, 0.75, -0.20, 0.13],
                          [15, 90, -90, 0, 0.75, -0.40, 0.13],
-                         [16, 90, -90, 0, 0.75, 0.40, 0.13]])
+                         [16, 90, -90, 0, 0.75, 0.40, 0.13],
+                         [17, 90, -90, 0, 0.45, 0.00, 0.13]])
     myTags = landmarks(hmRPYP, poseTags, ax_fig0)
 
     for _, pose in enumerate(myTags.poses):
@@ -266,12 +273,30 @@ if __name__ == "__main__":
     controls[1] = controls[1] + np.random.normal(0, 1, 9)
 
     # ---- Instantiate the robot class ----
-    myRobot = robot(hmRPYG, ax_fig0)
+    myRobot = robot(hmRPYG, ax_fig0, poseTags)
     poseRecord = np.zeros((1, 6))
+
+    # ---- Pseudo control update ----
+    '''
     for i, ctrl in enumerate(controls.T):
         myRobot.controlUpdate(ctrl)
         myRobot.poseUpdate()
         np.vstack((poseRecord, myRobot.updatedEstimate))
-        
-input("Press any key to close the figure...")
-plt.close()
+    '''
+
+    # ---- Apriltag measurement update ----
+    apriltagDetectionThread = threading.Thread(target=apriltagDetectionThreadFunc)
+    apriltagDetectionThread.start()
+
+    try:
+        while(1):
+            if avp.resultsGlobal != []:
+                oneResult = avp.resultsGlobal[:3]
+                myRobot.measurementUpdate(oneResult[1], oneResult.tag_id)
+                myRobot.poseUpdate()
+
+    except KeyboardInterrupt:
+        avp.aptIsRunning = False
+        apriltagDetectionThread.join()
+        print("exited main")
+        plt.close()
