@@ -236,7 +236,8 @@ class brickMap():
 
 # ---- initiate a apriltag detetcion threading func ----
 def apriltagDetectionThreadFunc():
-	avp.apriltag_video(print_log = True, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs)
+	avp.apriltag_video(print_log = True, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs, 
+                    display_stream=False, output_stream = False)
 
 if __name__ == "__main__":
     # ---- Create a figure object ----
@@ -291,9 +292,10 @@ if __name__ == "__main__":
     try:
         while(1):
             if avp.resultsGlobal != []:
-                oneResult = avp.resultsGlobal[:3]
-                myRobot.measurementUpdate(oneResult[1], oneResult.tag_id)
+                oneResult = avp.resultsGlobal[:4]
+                myRobot.measurementUpdate(oneResult[1], oneResult[0].tag_id)
                 myRobot.poseUpdate()
+                time.sleep(2)
 
     except KeyboardInterrupt:
         avp.aptIsRunning = False
