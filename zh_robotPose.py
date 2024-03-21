@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
-from scipy.spatial.transform import rotation as R
+from scipy.spatial.transform import Rotation as R
 import threading
-import apriltag_video_picamera1 as avp
+import apriltag_video_picamera4 as avp
 import time
 import calibrationfunc as cf
 
@@ -145,7 +145,7 @@ class robot():
         self.initialEstimate = np.zeros(6).astype('float')  # init the initail estimate of pose: roll, pitch, yaw, x, y, z.
         self.updatedEstimate = np.zeros(6).astype('float')
         self.ax = ax  # the plot axis.
-        self.cam2body = np.array([0, 0, 0, 0, 0, 0.10])  # in the camera frame.
+        self.cam2body = np.array([-90, 0, 90, 0, 0, 0.10])  # in the camera frame, RPYP.
         self.landmarks = landmarks  # nx7 array.
 
     def poseUpdate(self):
@@ -153,22 +153,34 @@ class robot():
         self.updatedEstimate = self.initialEstimate
 
         # draw the pose of the center of robot.
-        drawGround(self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]), self.ax, "Dog")
+        drawGround(self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]), self.ax, "")
         # update the rigid body vertices.
         self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
-        drawRigidBody(self.body_verticesGround, self.ax)
+        # drawRigidBody(self.body_verticesGround, self.ax)
 
     def measurementUpdate(self, homo, tagID):
-        # TODO: how to handle multiple tags.
+        # TODO: 1) how to handle multiple tags; 2) inaccurate when looking at tag from topleft and topright.
         # homo is the homogeneous matrix returned by the apriltag detector.
-        bodyPoseInTagFrame = np.dot(homo, self.hm(*self.cam2body[:3], self.cam2body[3:]))
-        targetTagPose = self.landmarks[self.landmarks[:, 0] == tagID, 1:]
-        poseGround = np.dot(self.hm(*targetTagPose[:3], targetTagPose[3:]), bodyPoseInTagFrame)
+        # get the correct rotation from the tags.
+        rotCamera = R.from_matrix(homo[:3, :3])
+        eulerCamera = rotCamera.as_euler('zyx', degrees = True)
+        rotCamera = rotY(- eulerCamera[2]).dot(rotX(- eulerCamera[1])).dot(rotZ(eulerCamera[0]))  # convert to standard zxy rotmat.
+        transCamera = homo[:-1, -1].flatten()
+        transCamera[0] *= -1
+        hmCamera = np.zeros((4, 4)).astype('float')
+        hmCamera[:3, :3] = rotCamera
+        hmCamera[:-1, -1] = transCamera
+        hmCamera[-1, -1] = 1.0
+        bodyPoseInTagFrame = np.dot(hmCamera, hmRPYP(*self.cam2body[:3], self.cam2body[3:]))
+        targetTagPose = self.landmarks[self.landmarks[:, 0] == tagID, 1:][0]
+        poseGround = np.dot(hmRPYP(*targetTagPose[:3], targetTagPose[3:]), bodyPoseInTagFrame)  # Tags use RPYP pose.
         rotGround = R.from_matrix(poseGround[:3, :3])
         translation = poseGround[:3, -1]
         # for now, let the initial estimate equal to the measurement.
-        self.initialEstimate[:3] = rotGround.as_euler('zyx', degrees = True)
+        self.initialEstimate[:3] = rotGround.as_euler('xyz', degrees = True)  # decompose using RPYG rule.
         self.initialEstimate[3:] = translation
+        # print("Translation: ", translation)
+        # drawGround(poseGround, self.ax, "")
 
     def odometryUpdate(self, dx, dyaw):
         pass
@@ -197,6 +209,15 @@ class landmarks():
         self.hm = hm  # specify the type of homegeneous matrix.
         self.poses = poses  # poses corresponding to the homogeneous matrix. Shape: nx7, 7 = tagID + 6 poses, n = No. of tags.
         self.ax = ax  # drawing axis.
+        self.tagSize = 0.10
+        self.tagThickness = 0.02
+        self.vertices = np.array([[0.5 * self.tagSize, 0.5 * self.tagSize, - 0.5 * self.tagSize, - 0.5 * self.tagSize, 
+                                        0.5 * self.tagSize, 0.5 * self.tagSize, - 0.5 * self.tagSize, - 0.5 * self.tagSize],
+                                       [0.5 * self.tagSize, - 0.5 * self.tagSize, - 0.5 * self.tagSize, 0.5 * self.tagSize, 
+                                        0.5 * self.tagSize, - 0.5 * self.tagSize, - 0.5 * self.tagSize, 0.5 * self.tagSize],
+                                       [0.5 * self.tagThickness, 0.5 * self.tagThickness, 0.5 * self.tagThickness, 0.5 * self.tagThickness, 
+                                        - 0.5 * self.tagThickness, - 0.5 * self.tagThickness, - 0.5 * self.tagThickness, - 0.5 * self.tagThickness],
+                                       [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
 
 
 class brickMap():
@@ -236,8 +257,7 @@ class brickMap():
 
 # ---- initiate a apriltag detetcion threading func ----
 def apriltagDetectionThreadFunc():
-	avp.apriltag_video(print_log = True, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs, 
-                    display_stream=False, output_stream = False)
+	avp.apriltag_video(print_log = False, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs, display_stream=False, output_stream = False)
 
 if __name__ == "__main__":
     # ---- Create a figure object ----
@@ -257,10 +277,11 @@ if __name__ == "__main__":
                          [15, 90, -90, 0, 0.75, -0.40, 0.13],
                          [16, 90, -90, 0, 0.75, 0.40, 0.13],
                          [17, 90, -90, 0, 0.45, 0.00, 0.13]])
-    myTags = landmarks(hmRPYP, poseTags, ax_fig0)
+    myTags = landmarks(hmRPYP, poseTags, ax_fig0)  # tags use RPYP pose.
 
     for _, pose in enumerate(myTags.poses):
             drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
+            drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
 
     # ---- Define a pseudo control input series ----
     '''
@@ -288,12 +309,13 @@ if __name__ == "__main__":
     # ---- Apriltag measurement update ----
     apriltagDetectionThread = threading.Thread(target=apriltagDetectionThreadFunc)
     apriltagDetectionThread.start()
-
-    try:
+	
+    try: 
         while(1):
             if avp.resultsGlobal != []:
                 oneResult = avp.resultsGlobal[:4]
                 myRobot.measurementUpdate(oneResult[1], oneResult[0].tag_id)
+                # print("initial estimate: ", myRobot.initialEstimate)  # verify the pose
                 myRobot.poseUpdate()
                 time.sleep(2)
 

@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 import numpy as np
 import os
 import cv2
-import apriltag
+# import apriltag
 from calibrationfunc import *
 
 os.system("sudo chmod 777 /dev/ttyS0")
