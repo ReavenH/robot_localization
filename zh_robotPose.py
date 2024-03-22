@@ -6,6 +6,30 @@ import threading
 import apriltag_video_picamera4 as avp
 import time
 import calibrationfunc as cf
+import serial
+
+# from WAVESHARE, establish serial connection.
+def connect_serial(port, baudrate):
+    while True:
+        try:
+            ser = serial.Serial(port, baudrate)
+            print("Serial connected")
+            return ser
+        except serial.SerialException as e:
+            print("Serial Disconnected:", e)
+            print("wait for 5 second for reconnecting...")
+            time.sleep(5)
+
+port = "/dev/ttyS0"
+baudrate = 115200
+ser = connect_serial(port, baudrate)
+
+# define a serial read function that returns dyaw and dx.
+# to be wrapped in a thread.
+odometryReadIsRunning = True  # thread control flag.
+def odometryRead():
+    while odometryReadIsRunning:
+        pass  # to plug in the functions.
 
 # define the ground coordinates:
 # X: pointing forwards; Y: pointing left; Z: pointing upwards
@@ -120,13 +144,13 @@ def drawRigidBody(vertices, ax):
 
 class robot():
     def __init__(self, hm, ax, landmarks): # hm is the 4x4 homogeneous matrix, for different rotation orders.
-        self.body_length = 0.20  # cm
-        self.body_width = 0.10  # cm
-        self.body_thickness = 0.03  # cm
+        self.body_length = 0.20  #  meter
+        self.body_width = 0.10  #  meter
+        self.body_thickness = 0.03  #  meter
         # the centroid of the robot, also the origin of the rigid body frame.
         # Can be adjusted to comply with the actual turning center.
         self.center = np.array([0.0, 0.0, 0.0])
-        # to store the vertices of the robot body as a rectangular prism.
+        # To store the vertices of the robot body as a rectangular prism.
         # the first column is the coordinates of the left-front corner of the rigid body,
         # starting from left-front, clockwise; from upper to bottom surface.
         # Under the rigid body frame. Size is 4x8.
@@ -138,7 +162,7 @@ class robot():
                                         - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2]],  # z coordinate
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])   # padding for computation.
         self.body_verticesGround = self.body_vertices  # in the ground frame.
-        self.measurement = np.zeros((4, 4)).astype('float')  # init the measurement of each update step.
+        self.measurement = np.zeros(6).astype('float')  # init the measurement of each update step.
         self.control = np.zeros(2).astype('float')  # init the 2D control input: translation along the X+ axis, delta-yaw.
         self.odometry = np.zeros(2).astype('float') # init the 2D odometry based on IMU.
         self.hm = hm  # pass the homogeneous matrix calculation func.
@@ -152,10 +176,11 @@ class robot():
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
         self.updatedEstimate = self.initialEstimate
 
-        # draw the pose of the center of robot.
+        # (optional) draw the pose of the center of robot.
         drawGround(self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]), self.ax, "")
-        # update the rigid body vertices.
-        self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
+
+        # (optional) update the rigid body vertices.
+        # self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
         # drawRigidBody(self.body_verticesGround, self.ax)
 
     def measurementUpdate(self, homo, tagID):
@@ -176,16 +201,17 @@ class robot():
         poseGround = np.dot(hmRPYP(*targetTagPose[:3], targetTagPose[3:]), bodyPoseInTagFrame)  # Tags use RPYP pose.
         rotGround = R.from_matrix(poseGround[:3, :3])
         translation = poseGround[:3, -1]
-        # for now, let the initial estimate equal to the measurement.
-        self.initialEstimate[:3] = rotGround.as_euler('xyz', degrees = True)  # decompose using RPYG rule.
-        self.initialEstimate[3:] = translation
-        # print("Translation: ", translation)
-        # drawGround(poseGround, self.ax, "")
+        self.measurement[:3] = rotGround.as_euler('xyz', degrees = True)  # decompose using RPYG rule.
+        self.measurement[3:] = translation
 
     def odometryUpdate(self, dx, dyaw):
-        pass
+        # update the initial estimate.
+        # the updatedEstimate refreshes in every 2~3 seconds.
+        # TODO: wrap it in a insulated thread to constantly update initialEstimate from IMU serial.
+        self.initialEstimate = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.hm(0, 0, dyaw, dx, 0, 0))
 
     def controlUpdate(self, ctrl):
+        # demo for displaying the 3D drawing.
         self.control = ctrl
         # update the init guess of pose (ground truth).
         # consider move the Gaussian noise here (forward noise).
@@ -309,18 +335,25 @@ if __name__ == "__main__":
     # ---- Apriltag measurement update ----
     apriltagDetectionThread = threading.Thread(target=apriltagDetectionThreadFunc)
     apriltagDetectionThread.start()
+
+    # ---- Odometry readings from serial ---- 
+    odometryReadThread = threading.Thread(target=odometryRead)
+    odometryRead.start()
 	
     try: 
         while(1):
             if avp.resultsGlobal != []:
                 oneResult = avp.resultsGlobal[:4]
                 myRobot.measurementUpdate(oneResult[1], oneResult[0].tag_id)
-                # print("initial estimate: ", myRobot.initialEstimate)  # verify the pose
-                myRobot.poseUpdate()
+                drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
                 time.sleep(2)
+                print(time.time())
 
     except KeyboardInterrupt:
+        # Kill the threads.
         avp.aptIsRunning = False
         apriltagDetectionThread.join()
+        odometryReadIsRunning = False
+        odometryReadThread.join()
         print("exited main")
         plt.close()
