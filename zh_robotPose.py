@@ -7,6 +7,9 @@ import apriltag_video_picamera4 as avp
 import time
 import calibrationfunc as cf
 import serial
+import json
+import re
+import os
 
 # from WAVESHARE, establish serial connection.
 def connect_serial(port, baudrate):
@@ -20,16 +23,51 @@ def connect_serial(port, baudrate):
             print("wait for 5 second for reconnecting...")
             time.sleep(5)
 
+##kill the agetty serial
+os.system("sudo systemctl stop serial-getty@ttyS0.service")
+
 port = "/dev/ttyS0"
 baudrate = 115200
 ser = connect_serial(port, baudrate)
+
+def readIMU():
+    
+    # decode each line in the buffer.
+    try:
+        value_str = ser.readline().decode().strip()
+    except Exception as e:
+        print(f"Error reading from serial port: {e}")
+        return
+ 
+    robot_time = re.search(r'Time: (\d+)', value_str)  # int
+    yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
+    dx = re.search(r'dx: (-?(\d+\.\d+|inf))', value_str)  # float
+
+    if robot_time:
+        # get the time in second
+        stamp = int(robot_time.group(1))
+    else:
+        stamp = None
+        
+    if yaw:
+        yaw_out = yaw.group(1)
+    else:
+        yaw_out = None
+        
+    if dx:
+        dx_out = dx.group(1)
+    else:
+        dx_out = None
+
+    return stamp, yaw_out, dx_out
 
 # define a serial read function that returns dyaw and dx.
 # to be wrapped in a thread.
 odometryReadIsRunning = True  # thread control flag.
 def odometryRead():
     while odometryReadIsRunning:
-        pass  # to plug in the functions.
+        myRobot.odometryUpdate(readIMU())
+
 
 # define the ground coordinates:
 # X: pointing forwards; Y: pointing left; Z: pointing upwards
@@ -171,10 +209,27 @@ class robot():
         self.ax = ax  # the plot axis.
         self.cam2body = np.array([-90, 0, 90, 0, 0, 0.10])  # in the camera frame, RPYP.
         self.landmarks = landmarks  # nx7 array.
+        self.lastYaw = 0.0
+        self.lastStamp = 0.0
+
+    def forward(speed=50):
+        dataCMD = json.dumps({'var':"move", 'val':1})
+        ser.write(dataCMD.encode())
+        print('robot-forward')
+    
+    def stopLR():
+        dataCMD = json.dumps({'var':"move", 'val':6})
+        ser.write(dataCMD.encode())
+        print('robot-stop')
+
+    def stopFB():
+        dataCMD = json.dumps({'var':"move", 'val':3})
+        ser.write(dataCMD.encode())
+        print('robot-stop')	
 
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
-        self.updatedEstimate = self.initialEstimate
+        self.initialEstimate = self.updatedEstimate
 
         # (optional) draw the pose of the center of robot.
         drawGround(self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]), self.ax, "")
@@ -204,11 +259,29 @@ class robot():
         self.measurement[:3] = rotGround.as_euler('xyz', degrees = True)  # decompose using RPYG rule.
         self.measurement[3:] = translation
 
-    def odometryUpdate(self, dx, dyaw):
+    def odometryUpdate(self, stamp, dx, yaw):
         # update the initial estimate.
         # the updatedEstimate refreshes in every 2~3 seconds.
         # TODO: wrap it in a insulated thread to constantly update initialEstimate from IMU serial.
-        self.initialEstimate = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.hm(0, 0, dyaw, dx, 0, 0))
+        if(self.lastStamp == 0.0):
+            dt = 0.0
+            self.lastStamp = stamp
+        elif(stamp == None):
+            dt = 0.0
+        else:
+            dt = stamp - self.lastStamp
+            self.lastStamp = stamp
+        
+        if(yaw == None):
+            dyaw = 0.0
+        else:
+            dyaw = yaw - self.lastYaw
+            self.lastYaw = yaw
+        
+        if(dx == None):
+            dx = 0.0
+
+        self.initialEstimate = self.hm(*self.initialEstimate[:3], self.initialEstimate[3:]).dot(self.hm(0, 0, dyaw, dx, 0, 0))
 
     def controlUpdate(self, ctrl):
         # demo for displaying the 3D drawing.
