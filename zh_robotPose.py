@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+
+import os
+os.path.join('/home/pi/.local/lib/python3.11/site-packages')
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
@@ -9,7 +13,6 @@ import calibrationfunc as cf
 import serial
 import json
 import re
-import os
 
 # from WAVESHARE, establish serial connection.
 def connect_serial(port, baudrate):
@@ -25,6 +28,7 @@ def connect_serial(port, baudrate):
 
 ##kill the agetty serial
 os.system("sudo systemctl stop serial-getty@ttyS0.service")
+os.system("sudo chmod 777 /dev/ttyS0")
 
 port = "/dev/ttyS0"
 baudrate = 115200
@@ -37,7 +41,7 @@ def readIMU():
         value_str = ser.readline().decode().strip()
     except Exception as e:
         print(f"Error reading from serial port: {e}")
-        return
+        return None, None, None
  
     robot_time = re.search(r'Time: (\d+)', value_str)  # int
     yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
@@ -59,14 +63,8 @@ def readIMU():
     else:
         dx_out = None
 
+    print(stamp, yaw_out, dx_out)
     return stamp, yaw_out, dx_out
-
-# define a serial read function that returns dyaw and dx.
-# to be wrapped in a thread.
-odometryReadIsRunning = True  # thread control flag.
-def odometryRead():
-    while odometryReadIsRunning:
-        myRobot.odometryUpdate(readIMU())
 
 
 # define the ground coordinates:
@@ -238,50 +236,113 @@ class robot():
         # self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
         # drawRigidBody(self.body_verticesGround, self.ax)
 
-    def measurementUpdate(self, homo, tagID):
+    def measurementUpdate(self, results):
         # TODO: 1) how to handle multiple tags; 2) inaccurate when looking at tag from topleft and topright.
-        # homo is the homogeneous matrix returned by the apriltag detector.
-        # get the correct rotation from the tags.
-        rotCamera = R.from_matrix(homo[:3, :3])
-        eulerCamera = rotCamera.as_euler('zyx', degrees = True)
-        rotCamera = rotY(- eulerCamera[2]).dot(rotX(- eulerCamera[1])).dot(rotZ(eulerCamera[0]))  # convert to standard zxy rotmat.
-        transCamera = homo[:-1, -1].flatten()
-        transCamera[0] *= -1
-        hmCamera = np.zeros((4, 4)).astype('float')
-        hmCamera[:3, :3] = rotCamera
-        hmCamera[:-1, -1] = transCamera
-        hmCamera[-1, -1] = 1.0
-        bodyPoseInTagFrame = np.dot(hmCamera, hmRPYP(*self.cam2body[:3], self.cam2body[3:]))
-        targetTagPose = self.landmarks[self.landmarks[:, 0] == tagID, 1:][0]
-        poseGround = np.dot(hmRPYP(*targetTagPose[:3], targetTagPose[3:]), bodyPoseInTagFrame)  # Tags use RPYP pose.
-        rotGround = R.from_matrix(poseGround[:3, :3])
-        translation = poseGround[:3, -1]
-        self.measurement[:3] = rotGround.as_euler('xyz', degrees = True)  # decompose using RPYG rule.
-        self.measurement[3:] = translation
+
+        # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.
+        # init storage.
+        translations = np.array([])
+        eulerAngles = np.array([])
+
+        # iterater over each tag's result.
+        for idx in np.arange(0, len(results), 4):
+            # homo is the homogeneous matrix returned by the apriltag detector.
+            # get the correct rotation from the tags.
+            homo = results[idx + 1]
+            # print(homo)
+            tagID = results[idx].tag_id
+            # print(tagID)
+            '''
+            if tagID not in self.landmarks[:, 0]:
+                continue
+            '''
+            rotCamera = R.from_matrix(homo[:3, :3])
+            eulerCamera = rotCamera.as_euler('zyx', degrees = True)
+            rotCamera = rotY(- eulerCamera[2]).dot(rotX(- eulerCamera[1])).dot(rotZ(eulerCamera[0]))  # convert to standard zxy rotmat.
+            transCamera = homo[:-1, -1].flatten()
+            transCamera[0] *= -1
+            hmCamera = np.zeros((4, 4)).astype('float')
+            hmCamera[:3, :3] = rotCamera
+            hmCamera[:-1, -1] = transCamera
+            hmCamera[-1, -1] = 1.0
+            bodyPoseInTagFrame = np.dot(hmCamera, hmRPYP(*self.cam2body[:3], self.cam2body[3:]))
+            targetTagPose = self.landmarks[self.landmarks[:, 0] == tagID, 1:][0]
+            poseGround = np.dot(hmRPYP(*targetTagPose[:3], targetTagPose[3:]), bodyPoseInTagFrame)  # Tags use RPYP pose.
+            rotGround = R.from_matrix(poseGround[:3, :3])
+            translation = poseGround[:3, -1]
+            # self.measurement[:3] = rotGround.as_euler('xyz', degrees = True)  # decompose using RPYG rule.
+            # self.measurement[3:] = translation
+            translations = np.append(translations, translation)
+            eulerAngles = np.append(eulerAngles, rotGround.as_euler('xyz', degrees = True))
+
+        translations = translations.reshape(-1, 3)
+        eulerAngles = eulerAngles.reshape(-1, 3)
+        print(translations)
+        print(eulerAngles)
+
+        numResults = (idx + 4) // 4
+        print("numResults: ", numResults)
+
+        
+            # eliminate trash data (the one deviates most from the mass center) for each dimension.
+        if numResults >= 3: 
+            translationsAvg = np.average(translations, axis=0)
+            eulerAnglesAvg = np.average(eulerAngles, axis=0)
+            transMaxIdx = np.argmax(translations - translationsAvg, axis=0)
+            eulerAnglesMaxIdx = np.argmax(eulerAngles - eulerAnglesAvg, axis=0)
+            translations[transMaxIdx, np.arange(0, translations.shape[1])] = 0  # nullify the deviated data.
+            eulerAngles[eulerAnglesMaxIdx, np.arange(0, eulerAngles.shape[1])] = 0
+            # average the rest of the data in each dimension.
+            translations = np.sum(translations, axis=0) / (numResults - 1)
+            eulerAngles = np.sum(eulerAngles, axis=0) / (numResults - 1)
+        
+        if numResults == 2:
+            # average the rest of the data in each dimension.
+            translations = np.sum(translations, axis=0) / 2
+            eulerAngles = np.sum(eulerAngles, axis=0) / 2
+
+        print(eulerAngles)
+        print(translations)
+        self.measurement[:3] = eulerAngles.flatten()
+        self.measurement[3:] = translations.flatten()
+        print(self.measurement)
+
 
     def odometryUpdate(self, stamp, dx, yaw):
         # update the initial estimate.
         # the updatedEstimate refreshes in every 2~3 seconds.
         # TODO: wrap it in a insulated thread to constantly update initialEstimate from IMU serial.
-        if(self.lastStamp == 0.0):
-            dt = 0.0
-            self.lastStamp = stamp
-        elif(stamp == None):
-            dt = 0.0
+        
+        if(stamp != None):
+            stamp = float(stamp)
+            if(self.lastStamp == 0.0):
+                dt = 0.0
+                self.lastStamp = stamp
+            else:
+                dt = stamp - self.lastStamp
+                self.lastStamp = stamp
         else:
-            dt = stamp - self.lastStamp
-            self.lastStamp = stamp
+            dt = 0.0
         
         if(yaw == None):
             dyaw = 0.0
         else:
+            yaw = float(yaw)
             dyaw = yaw - self.lastYaw
             self.lastYaw = yaw
         
         if(dx == None):
             dx = 0.0
-
-        self.initialEstimate = self.hm(*self.initialEstimate[:3], self.initialEstimate[3:]).dot(self.hm(0, 0, dyaw, dx, 0, 0))
+        else:
+            dx = float(dx)
+        
+        trans = np.array([dx, 0, 0])
+        print("odoUpdate: ", dyaw, dx)
+        initialEstimateHM = np.dot(self.hm(0, 0, dyaw, trans), self.hm(*self.initialEstimate[:3], self.initialEstimate[3:]))
+        print(initialEstimateHM)
+        self.initialEstimate[3:] = initialEstimateHM[:-1, -1].flatten()
+        self.initialEstimate[:3] = R.from_matrix(initialEstimateHM[:3, :3]).as_euler('xyz', degrees = True)
+        print("Initial Estimate: ", self.initialEstimate)
 
     def controlUpdate(self, ctrl):
         # demo for displaying the 3D drawing.
@@ -371,11 +432,10 @@ if __name__ == "__main__":
     ax_fig0.set_zlim([0, 1.5])
     
     # ---- Initialize the tags as an object ----
-    poseTags = np.array([[13, 90, -90, 0, 0.75, 0.20, 0.13],
-                         [14, 90, -90, 0, 0.75, -0.20, 0.13],
-                         [15, 90, -90, 0, 0.75, -0.40, 0.13],
-                         [16, 90, -90, 0, 0.75, 0.40, 0.13],
-                         [17, 90, -90, 0, 0.45, 0.00, 0.13]])
+    poseTags = np.array([[14, 90, -90, 0, 0.50, 0.22, 0.13],
+                         [16, 90, -90, 0, 0.50, 0.11, 0.13],
+                         [17, 90, -90, 0, 0.50, 0.00, 0.13],
+                         [19, 90, -90, 0, 0.50, -0.11, 0.13]])
     myTags = landmarks(hmRPYP, poseTags, ax_fig0)  # tags use RPYP pose.
 
     for _, pose in enumerate(myTags.poses):
@@ -410,23 +470,37 @@ if __name__ == "__main__":
     apriltagDetectionThread.start()
 
     # ---- Odometry readings from serial ---- 
+    # define a serial read function that returns dyaw and dx.
+    # to be wrapped in a thread.
+    '''
+    odometryReadIsRunning = True  # thread control flag.
+    def odometryRead():
+        while odometryReadIsRunning:
+            myRobot.odometryUpdate(*readIMU())
     odometryReadThread = threading.Thread(target=odometryRead)
-    odometryRead.start()
+    odometryReadThread.start()
+    '''
 	
-    try: 
+    try:  
+        myRobot.forward()
         while(1):
+            # myRobot.odometryUpdate(*readIMU())
             if avp.resultsGlobal != []:
-                oneResult = avp.resultsGlobal[:4]
+                '''
+                oneResult = avp.resultsGlobal[:4] 
                 myRobot.measurementUpdate(oneResult[1], oneResult[0].tag_id)
+                '''
+                myRobot.measurementUpdate(avp.resultsGlobal)
                 drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
-                time.sleep(2)
-                print(time.time())
+                time.sleep(1)
+            # print(time.time())
 
     except KeyboardInterrupt:
         # Kill the threads.
         avp.aptIsRunning = False
         apriltagDetectionThread.join()
-        odometryReadIsRunning = False
-        odometryReadThread.join()
+        # odometryReadIsRunning = False
+        # odometryReadThread.join()
+        myRobot.stopFB()
         print("exited main")
         plt.close()
