@@ -13,6 +13,8 @@ import calibrationfunc as cf
 import serial
 import json
 import re
+import socket
+import pickle
 
 # from WAVESHARE, establish serial connection.
 def connect_serial(port, baudrate):
@@ -283,8 +285,7 @@ class robot():
         numResults = (idx + 4) // 4
         print("numResults: ", numResults)
 
-        
-            # eliminate trash data (the one deviates most from the mass center) for each dimension.
+        # eliminate trash data (the one deviates most from the mass center) for each dimension.
         if numResults >= 3: 
             translationsAvg = np.average(translations, axis=0)
             eulerAnglesAvg = np.average(eulerAngles, axis=0)
@@ -415,6 +416,22 @@ class brickMap():
         # TODO: the rule check function before placing bricks.
         return True
 
+# WiFi data TX function.
+class UDPSender():
+    def __init__(self, pc_ip, pc_port) -> None:
+        self.pc_ip = pc_ip
+        self.pc_port = pc_port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def send(self, message):  # message is a np.array of the robot pose.
+        # serialize the array.
+        serialized_array = pickle.dumps(message)
+        self.sock.sendto(serialized_array, (self.pc_ip, self.pc_port))
+        print("Data Sent to IP {}, Port {}".format(self.pc_ip, self.pc_port))
+
+    def close(self):
+        self.sock.close()
+
 # ---- initiate a apriltag detetcion threading func ----
 def apriltagDetectionThreadFunc():
 	avp.apriltag_video(print_log = False, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs, display_stream=False, output_stream = False)
@@ -481,26 +498,31 @@ if __name__ == "__main__":
     odometryReadThread.start()
     '''
 	
+    # data sender init.
+    PC_IP = "10.50.14.195"
+    PC_Port = 52000
+    poseSender = UDPSender(PC_IP, PC_Port)
+
     try:  
         myRobot.forward()
         while(1):
             # myRobot.odometryUpdate(*readIMU())
             if avp.resultsGlobal != []:
-                '''
-                oneResult = avp.resultsGlobal[:4] 
-                myRobot.measurementUpdate(oneResult[1], oneResult[0].tag_id)
-                '''
                 myRobot.measurementUpdate(avp.resultsGlobal)
-                drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
-                time.sleep(1)
+                # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
+                print(myRobot.measurement)
+                poseSender.send(myRobot.measurement)  # send the pose array.
+                # time.sleep(1)
             # print(time.time())
 
     except KeyboardInterrupt:
+        
+        myRobot.stopFB()
         # Kill the threads.
         avp.aptIsRunning = False
         apriltagDetectionThread.join()
         # odometryReadIsRunning = False
         # odometryReadThread.join()
-        myRobot.stopFB()
+        poseSender.close()
         print("exited main")
         plt.close()
