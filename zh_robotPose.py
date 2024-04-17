@@ -279,11 +279,11 @@ class robot():
 
         translations = translations.reshape(-1, 3)
         eulerAngles = eulerAngles.reshape(-1, 3)
-        print(translations)
-        print(eulerAngles)
+        # print(translations)
+        # print(eulerAngles)
 
         numResults = (idx + 4) // 4
-        print("numResults: ", numResults)
+        # print("numResults: ", numResults)
 
         # eliminate trash data (the one deviates most from the mass center) for each dimension.
         if numResults >= 3: 
@@ -302,11 +302,11 @@ class robot():
             translations = np.sum(translations, axis=0) / 2
             eulerAngles = np.sum(eulerAngles, axis=0) / 2
 
-        print(eulerAngles)
-        print(translations)
+        # print(eulerAngles)
+        # print(translations)
         self.measurement[:3] = eulerAngles.flatten()
         self.measurement[3:] = translations.flatten()
-        print(self.measurement)
+        # print(self.measurement)
 
 
     def odometryUpdate(self, stamp, dx, yaw):
@@ -449,15 +449,25 @@ if __name__ == "__main__":
     ax_fig0.set_zlim([0, 1.5])
     
     # ---- Initialize the tags as an object ----
+    '''
     poseTags = np.array([[14, 90, -90, 0, 0.50, 0.22, 0.13],
                          [16, 90, -90, 0, 0.50, 0.11, 0.13],
                          [17, 90, -90, 0, 0.50, 0.00, 0.13],
                          [19, 90, -90, 0, 0.50, -0.11, 0.13]])
+    '''
+    # poses of the larger fixed tags.
+    poseTags = np.array([[3, 90, -90, 0, 1.164, 0, 0.17],
+                         [1, 90, 0, 0, 0.895, 1.175, 0.17],
+                         [0, 90, 90, 0, -0.376, 0.78, 0.17],
+                         [2, 90, 180, 0, 0, -0.35, 0.17]])
+
     myTags = landmarks(hmRPYP, poseTags, ax_fig0)  # tags use RPYP pose.
 
+    '''
     for _, pose in enumerate(myTags.poses):
             drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
             drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
+    '''
 
     # ---- Define a pseudo control input series ----
     '''
@@ -499,9 +509,12 @@ if __name__ == "__main__":
     '''
 	
     # data sender init.
-    PC_IP = "10.50.14.195"
+    PC_IP = "10.50.24.229"  # should be updated DAILY!!!
     PC_Port = 52000
     poseSender = UDPSender(PC_IP, PC_Port)
+
+    # store the previous pose (control sending speed)
+    previousPose = np.zeros(6).astype('float')
 
     try:  
         myRobot.forward()
@@ -509,11 +522,11 @@ if __name__ == "__main__":
             # myRobot.odometryUpdate(*readIMU())
             if avp.resultsGlobal != []:
                 myRobot.measurementUpdate(avp.resultsGlobal)
-                # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
-                print(myRobot.measurement)
-                poseSender.send(myRobot.measurement)  # send the pose array.
-                # time.sleep(1)
-            # print(time.time())
+                if not np.all(myRobot.measurement.copy() == previousPose.copy()):  
+                    # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
+                    print("Measurement at {} : {}".format(time.time(), myRobot.measurement))
+                    poseSender.send(myRobot.measurement.copy())  # send the pose array.
+                    previousPose = myRobot.measurement.copy()  # store the previous pose.
 
     except KeyboardInterrupt:
         

@@ -99,7 +99,7 @@ def drawGround(pose, ax, label):
     # text
     ax.text(newOrigin[0], newOrigin[1], newOrigin[2] - 0.03, label, color = 'black')
     plt.show()
-    plt.pause(0.02)
+    plt.pause(0.005)  # default 0.02
 
 
 def drawRigidBody(vertices, ax):
@@ -130,7 +130,7 @@ class landmarks():
                                         - 0.5 * self.tagThickness, - 0.5 * self.tagThickness, - 0.5 * self.tagThickness, - 0.5 * self.tagThickness],
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
         
-poseTags = np.array([[14, 90, -90, 0, 0.50, 0.22, 0.13],
-                         [16, 90, -90, 0, 0.50, 0.11, 0.13],
-                         [17, 90, -90, 0, 0.50, 0.00, 0.13],
-                         [19, 90, -90, 0, 0.50, -0.11, 0.13]])
+poseTags = np.array([[3, 90, -90, 0, 1.164, 0, 0.17],
+                     [1, 90, 0, 0, 0.895, 1.175, 0.17],
+                     [0, 90, 90, 0, -0.376, 0.78, 0.17],
+                     [2, 90, 180, 0, 0, -0.35, 0.17]])

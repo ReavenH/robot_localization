@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 # from zh_robotPose import landmarks, poseTags, hmRPYG, hmRPYP, drawGround, drawRigidBody, robot
 from zh_Utilities import *
 import time
-import threading
 
 class PCReceiver():
     def __init__(self, local_port):
@@ -34,8 +33,8 @@ if __name__ == "__main__":
     ax_fig0.set_ylabel('Y')
     ax_fig0.set_zlabel('Z')
     
-    ax_fig0.set_xlim([-0.5, 1.0])
-    ax_fig0.set_ylim([-0.75, 0.75])
+    ax_fig0.set_xlim([-0.25, 1.25])
+    ax_fig0.set_ylim([-0.25, 1.25])
     ax_fig0.set_zlim([0, 1.5])
 
     myTags = landmarks(hmRPYP, poseTags, ax_fig0)  # tags use RPYP pose.
@@ -44,25 +43,32 @@ if __name__ == "__main__":
             drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
             drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
 
-    receivedArray = np.zeros((1, 6))
-
-    # define a thread to plot.
-    def plotThreadFunc():
-        while(True):
-            drawGround(hmRPYG(*receivedArray[:3], receivedArray[3:]), ax_fig0, "")
-            time.sleep(1)
-
-    # init the threading function.
-    plotThread = threading.Thread(target=plotThreadFunc)
-    plotThread.start()
+    receivedArray = np.zeros(6)
 
     try:
         while(True):
             receivedArray, _ = receiver.receive_array()
-            # drawGround(hmRPYG(*array[:3], array[3:]), ax_fig0, "")
-            print("Received Array: {}, Is Numpy Array: {}, Size of Message: {} Bytes".format(receivedArray, isinstance(receivedArray, np.ndarray), sys.getsizeof(receivedArray)))
+
+            ax_fig0.cla()
+            ax_fig0.set_xlabel('X')
+            ax_fig0.set_ylabel('Y')
+            ax_fig0.set_zlabel('Z')
+            
+            ax_fig0.set_xlim([-0.25, 1.25])
+            ax_fig0.set_ylim([-0.25, 1.25])
+            ax_fig0.set_zlim([0, 1.5])
+            
+            '''
+            for _, pose in enumerate(myTags.poses):
+                drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
+                drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
+            '''
+
+            drawGround(hmRPYG(*receivedArray[:3], receivedArray[3:]), ax_fig0, "")
+            # print("Received Array: {}, Is Numpy Array: {}, Size of Message: {} Bytes".format(receivedArray, isinstance(receivedArray, np.ndarray), sys.getsizeof(receivedArray)))
+            # time.sleep(2)
 
     except KeyboardInterrupt:
-        receiver.close()
-        plotThread.join()
         plt.close()
+        receiver.close()
+        
