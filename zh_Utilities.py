@@ -99,7 +99,7 @@ def drawGround(pose, ax, label):
     # text
     ax.text(newOrigin[0], newOrigin[1], newOrigin[2] - 0.03, label, color = 'black')
     plt.show()
-    plt.pause(0.005)  # default 0.02
+    plt.pause(0.02)  # default 0.02
 
 
 def drawRigidBody(vertices, ax):
@@ -130,7 +130,26 @@ class landmarks():
                                         - 0.5 * self.tagThickness, - 0.5 * self.tagThickness, - 0.5 * self.tagThickness, - 0.5 * self.tagThickness],
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
         
-poseTags = np.array([[3, 90, -90, 0, 1.164, 0, 0.17],
-                     [1, 90, 0, 0, 0.895, 1.175, 0.17],
+# width of 3 tags without edge: 56.6cm, interval: 2.2cm. width of tags: 17.2cm
+poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
+                     [3, 90, -90, 0, 0.994 + 0.265 - 0.10, 0.172 + 0.022, 0.055 + 0.172/2],
+                     [5, 90, -90, 0, 0.994 + 0.265 - 0.10, -(0.172 + 0.022), 0.055 + 0.172/2],
+                     [7, 90, 0, 0, 0.994 - 0.20, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                     [6, 90, 0, 0, 0.994 - 0.20 + 0.172 + 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                     [1, 90, 0, 0, 0.994 - 0.20 - 0.172 - 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
                      [0, 90, 90, 0, -0.376, 0.78, 0.17],
                      [2, 90, 180, 0, 0, -0.35, 0.17]])
+
+# function of Yaw and X, Z calibration.
+def calibratePose2D(yaw, trans):
+    # Calibrate Yaw:
+    biasAngle = np.arcsin(trans[0] / trans[-1])
+    biasAngle = np.degrees(biasAngle)
+    yaw = yaw + biasAngle
+    yawRad = np.radians(yaw)
+
+    # calibrate X translation.
+    trans[0] = trans[-1] * np.sin(yawRad)
+    trans[-1] = trans[-1] * np.cos(yawRad)
+
+    return yaw, trans

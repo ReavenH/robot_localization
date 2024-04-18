@@ -47,7 +47,11 @@ if __name__ == "__main__":
 
     try:
         while(True):
+
+            # depackage.
             receivedArray, _ = receiver.receive_array()
+            receivedStamp = receivedArray[0]
+            receivedArray = receivedArray[1:]
 
             ax_fig0.cla()
             ax_fig0.set_xlabel('X')
@@ -61,9 +65,9 @@ if __name__ == "__main__":
             '''
             for _, pose in enumerate(myTags.poses):
                 drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
-                drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
+                # drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
             '''
-
+            # print(receivedStamp)
             drawGround(hmRPYG(*receivedArray[:3], receivedArray[3:]), ax_fig0, "")
             # print("Received Array: {}, Is Numpy Array: {}, Size of Message: {} Bytes".format(receivedArray, isinstance(receivedArray, np.ndarray), sys.getsizeof(receivedArray)))
             # time.sleep(2)

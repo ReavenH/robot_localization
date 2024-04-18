@@ -69,6 +69,21 @@ def readIMU():
     return stamp, yaw_out, dx_out
 
 
+# Calibrate the Yaw and X, Z translation (based on Yao and Peng's code)
+def calibratePose2D(yaw, trans):
+    # Calibrate Yaw:
+    biasAngle = np.arcsin(trans[0] / trans[-1])
+    biasAngle = np.degrees(biasAngle)
+    yaw = yaw + biasAngle
+    # yaw = biasAngle
+    yawRad = np.radians(yaw)
+
+    # calibrate X translation.
+    trans[0] = trans[-1] * np.sin(yawRad)
+    trans[-1] = trans[-1] * np.cos(yawRad)
+
+    return yaw, trans
+
 # define the ground coordinates:
 # X: pointing forwards; Y: pointing left; Z: pointing upwards
 # each column: x, y, z point coords,
@@ -207,7 +222,7 @@ class robot():
         self.initialEstimate = np.zeros(6).astype('float')  # init the initail estimate of pose: roll, pitch, yaw, x, y, z.
         self.updatedEstimate = np.zeros(6).astype('float')
         self.ax = ax  # the plot axis.
-        self.cam2body = np.array([-90, 0, 90, 0, 0, 0.10])  # in the camera frame, RPYP.
+        self.cam2body = np.array([-90, 0, 90, 0, 0, 0.15])  # in the camera frame, RPYP. Default: np.array([-90, 0, 90, 0, 0, 0.10])
         self.landmarks = landmarks  # nx7 array.
         self.lastYaw = 0.0
         self.lastStamp = 0.0
@@ -238,8 +253,8 @@ class robot():
         # self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
         # drawRigidBody(self.body_verticesGround, self.ax)
 
-    def measurementUpdate(self, results):
-        # TODO: 1) how to handle multiple tags; 2) inaccurate when looking at tag from topleft and topright.
+    def measurementUpdate(self, results, useCalibration = True):
+        # TODO: map to the body of dog.
 
         # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.
         # init storage.
@@ -260,9 +275,12 @@ class robot():
             '''
             rotCamera = R.from_matrix(homo[:3, :3])
             eulerCamera = rotCamera.as_euler('zyx', degrees = True)
-            rotCamera = rotY(- eulerCamera[2]).dot(rotX(- eulerCamera[1])).dot(rotZ(eulerCamera[0]))  # convert to standard zxy rotmat.
             transCamera = homo[:-1, -1].flatten()
             transCamera[0] *= -1
+            # Add the optional calibration function.
+            if useCalibration:
+                eulerCamera[1], transCamera = calibratePose2D(eulerCamera[1], transCamera)
+            rotCamera = rotY(- eulerCamera[2]).dot(rotX(- eulerCamera[1])).dot(rotZ(eulerCamera[0]))  # convert to standard zxy rotmat.
             hmCamera = np.zeros((4, 4)).astype('float')
             hmCamera[:3, :3] = rotCamera
             hmCamera[:-1, -1] = transCamera
@@ -456,11 +474,22 @@ if __name__ == "__main__":
                          [19, 90, -90, 0, 0.50, -0.11, 0.13]])
     '''
     # poses of the larger fixed tags.
+    '''
     poseTags = np.array([[3, 90, -90, 0, 1.164, 0, 0.17],
                          [1, 90, 0, 0, 0.895, 1.175, 0.17],
                          [0, 90, 90, 0, -0.376, 0.78, 0.17],
                          [2, 90, 180, 0, 0, -0.35, 0.17]])
+    '''
 
+    poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
+                     [3, 90, -90, 0, 0.994 + 0.265 - 0.10, 0.172 + 0.022, 0.055 + 0.172/2],
+                     [5, 90, -90, 0, 0.994 + 0.265 - 0.10, -(0.172 + 0.022), 0.055 + 0.172/2],
+                     [7, 90, 0, 0, 0.994 - 0.20, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                     [6, 90, 0, 0, 0.994 - 0.20 + 0.172 + 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                     [1, 90, 0, 0, 0.994 - 0.20 - 0.172 - 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                     [0, 90, 90, 0, -0.376, 0.78, 0.17],
+                     [2, 90, 180, 0, 0, -0.35, 0.17]])
+    
     myTags = landmarks(hmRPYP, poseTags, ax_fig0)  # tags use RPYP pose.
 
     '''
@@ -509,7 +538,7 @@ if __name__ == "__main__":
     '''
 	
     # data sender init.
-    PC_IP = "10.50.24.229"  # should be updated DAILY!!!
+    PC_IP = "10.50.30.140"  # should be updated DAILY!!!
     PC_Port = 52000
     poseSender = UDPSender(PC_IP, PC_Port)
 
@@ -517,7 +546,7 @@ if __name__ == "__main__":
     previousPose = np.zeros(6).astype('float')
 
     try:  
-        myRobot.forward()
+        # myRobot.forward()
         while(1):
             # myRobot.odometryUpdate(*readIMU())
             if avp.resultsGlobal != []:
@@ -525,12 +554,12 @@ if __name__ == "__main__":
                 if not np.all(myRobot.measurement.copy() == previousPose.copy()):  
                     # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
                     print("Measurement at {} : {}".format(time.time(), myRobot.measurement))
-                    poseSender.send(myRobot.measurement.copy())  # send the pose array.
+                    poseSender.send(np.append(time.time(), myRobot.measurement.copy()))  # send the pose array.
                     previousPose = myRobot.measurement.copy()  # store the previous pose.
 
     except KeyboardInterrupt:
         
-        myRobot.stopFB()
+        # myRobot.stopFB()
         # Kill the threads.
         avp.aptIsRunning = False
         apriltagDetectionThread.join()
