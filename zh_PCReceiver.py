@@ -68,6 +68,8 @@ if __name__ == "__main__":
                 # drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
             '''
             # print(receivedStamp)
+            plt.plot(trackInner[0, :], trackInner[1, :], trackInner[2, :])
+            plt.plot(trackOuter[0, :], trackOuter[1, :], trackOuter[2, :])
             drawGround(hmRPYG(*receivedArray[:3], receivedArray[3:]), ax_fig0, "")
             # print("Received Array: {}, Is Numpy Array: {}, Size of Message: {} Bytes".format(receivedArray, isinstance(receivedArray, np.ndarray), sys.getsizeof(receivedArray)))
             # time.sleep(2)

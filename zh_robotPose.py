@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 os.path.join('/home/pi/.local/lib/python3.11/site-packages')
@@ -7,7 +7,6 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import threading
-import apriltag_video_picamera4 as avp
 import time
 import calibrationfunc as cf
 import serial
@@ -15,6 +14,7 @@ import json
 import re
 import socket
 import pickle
+import final_localization as fl
 
 # from WAVESHARE, establish serial connection.
 def connect_serial(port, baudrate):
@@ -75,14 +75,13 @@ def calibratePose2D(yaw, trans):
     biasAngle = np.arcsin(trans[0] / trans[-1])
     biasAngle = np.degrees(biasAngle)
     yaw = yaw + biasAngle
-    # yaw = biasAngle
     yawRad = np.radians(yaw)
 
     # calibrate X translation.
     trans[0] = trans[-1] * np.sin(yawRad)
     trans[-1] = trans[-1] * np.cos(yawRad)
 
-    return yaw, trans
+    return trans
 
 # define the ground coordinates:
 # X: pointing forwards; Y: pointing left; Z: pointing upwards
@@ -226,6 +225,7 @@ class robot():
         self.landmarks = landmarks  # nx7 array.
         self.lastYaw = 0.0
         self.lastStamp = 0.0
+        self.trajectoryNo = 0
 
     def forward(speed=50):
         dataCMD = json.dumps({'var':"move", 'val':1})
@@ -269,6 +269,9 @@ class robot():
             # print(homo)
             tagID = results[idx].tag_id
             # print(tagID)
+            # decide which board the robot is looking at.
+            self.trajectoryNo = np.where(tagID == tagGroups)[0][0]
+            # print("self.trajectoryNo = ", self.trajectoryNo)
             '''
             if tagID not in self.landmarks[:, 0]:
                 continue
@@ -279,7 +282,7 @@ class robot():
             transCamera[0] *= -1
             # Add the optional calibration function.
             if useCalibration:
-                eulerCamera[1], transCamera = calibratePose2D(eulerCamera[1], transCamera)
+                transCamera = calibratePose2D(eulerCamera[1], transCamera)
             rotCamera = rotY(- eulerCamera[2]).dot(rotX(- eulerCamera[1])).dot(rotZ(eulerCamera[0]))  # convert to standard zxy rotmat.
             hmCamera = np.zeros((4, 4)).astype('float')
             hmCamera[:3, :3] = rotCamera
@@ -294,6 +297,7 @@ class robot():
             # self.measurement[3:] = translation
             translations = np.append(translations, translation)
             eulerAngles = np.append(eulerAngles, rotGround.as_euler('xyz', degrees = True))
+            
 
         translations = translations.reshape(-1, 3)
         eulerAngles = eulerAngles.reshape(-1, 3)
@@ -441,85 +445,108 @@ class UDPSender():
         self.pc_port = pc_port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    def send(self, message):  # message is a np.array of the robot pose.
+    def send(self, message, verbose = False):  # message is a np.array of the robot pose.
         # serialize the array.
         serialized_array = pickle.dumps(message)
         self.sock.sendto(serialized_array, (self.pc_ip, self.pc_port))
-        print("Data Sent to IP {}, Port {}".format(self.pc_ip, self.pc_port))
+        if verbose:
+            print("Data Sent to IP {}, Port {}".format(self.pc_ip, self.pc_port))
 
     def close(self):
         self.sock.close()
 
-# ---- initiate a apriltag detetcion threading func ----
-def apriltagDetectionThreadFunc():
-	avp.apriltag_video(print_log = False, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs, display_stream=False, output_stream = False)
+# ---- Create a figure object ----
+fig0 = plt.figure(0)
+ax_fig0 = fig0.add_subplot(111, projection='3d')
+ax_fig0.set_xlabel('X')
+ax_fig0.set_ylabel('Y')
+ax_fig0.set_zlabel('Z')
+
+ax_fig0.set_xlim([-0.5, 1.0])
+ax_fig0.set_ylim([-0.75, 0.75])
+ax_fig0.set_zlim([0, 1.5])
+
+# ---- Initialize the tags as an object ----
+boardBiasesX = np.array([0.005, 0.025, 0.007, 0.0])  # 0.018
+boardBiasesY = np.array([0.02, -0.025, 0.0, 0.02])
+boardBiasesYaw = np.array([-1.5, -1, 0, 0])
+
+poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
+                 [3, 90, -90, 0, 0.994 + 0.265 - 0.10, 0.172 + 0.022, 0.055 + 0.172/2],
+                 [5, 90, -90, 0, 0.994 + 0.265 - 0.10, -(0.172 + 0.022), 0.055 + 0.172/2],
+                 [7, 90, 0, 0, 0.994 - 0.20, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                 [6, 90, 0, 0, 0.994 - 0.20 + 0.172 + 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                 [1, 90, 0, 0, 0.994 - 0.20 - 0.172 - 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
+                 [0, 90, 90, 0, -0.376, 1.002 - 0.20 + 0.172 + 0.022, 0.055 + 0.172/2],
+                 [8, 90, 90, 0, -0.376, 1.002 - 0.20 - (0.172 + 0.022), 0.055 + 0.172/2],
+                 [9, 90, 90, 0, -0.376, 1.002 - 0.20, 0.055 + 0.172/2],
+                 [2, 90, 180, 0, 0.172 + 0.022, -0.35, 0.055 + 0.172/2],
+                 [10, 90, 180, 0, 0.0, -0.35, 0.055 + 0.172/2],
+                 [11, 90, 180, 0, -(0.172 + 0.022), -0.35, 0.055 + 0.172/2]])
+
+# adjust the biases of tags.
+poseTags[0:3, 4] += boardBiasesX[0]
+poseTags[3:6, 5] += boardBiasesX[1]
+poseTags[6:9, 4] += boardBiasesX[2]
+poseTags[9:12, 5] += boardBiasesX[3]
+
+poseTags[0:3, 5] += boardBiasesY[0]
+poseTags[3:6, 4] += boardBiasesY[1]
+poseTags[6:9, 5] += boardBiasesY[2]
+poseTags[9:12, 4] += boardBiasesY[3]
+
+'''
+poseTags[0:3, 2] += boardBiasesYaw[0]
+poseTags[3:6, 2] += boardBiasesYaw[1]
+poseTags[6:9, 2] += boardBiasesYaw[2]
+poseTags[9:12, 2] += boardBiasesYaw[3]
+'''
+
+myTags = landmarks(hmRPYP, poseTags, ax_fig0)  # tags use RPYP pose.
+'''
+for _, pose in enumerate(myTags.poses):
+        drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
+        drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
+'''
+# ---- Instantiate the robot class ----
+myRobot = robot(hmRPYG, ax_fig0, poseTags)
+poseRecord = np.zeros((1, 6))
+
+# data sender init.
+PC_IP = "10.50.9.219"  # should be updated DAILY!!!
+PC_Port = 52000
+poseSender = UDPSender(PC_IP, PC_Port)
+
+# store the previous pose (control sending speed)
+previousPose = np.zeros(6).astype('float')
+
+# a simpler trajectory, in the world frame.
+trajectory = np.array([[0.0, 0.994 - 0.20, 0.994 - 0.20, 0.0, 0.0],  # x coordinate
+                       [0.0, 0.0, 0.995 - 0.20, 0.995 - 0.20, 0.0],  # y coordinate
+                       [0.0, 0.0, 0.0, 0.0, 0.0]])  # z coordinate
+
+# tag grouping, each row represents the tagIDs on the same board.
+tagGroups = np.array([[3, 4, 5],
+                      [1, 7, 6],
+                      [8, 9, 0],
+                      [2, 10, 11]])
+
+def checkTurning(brickNo, pose, trajectory):
+    corner = trajectory[:, brickNo + 1]
+    yaw = pose[1]
+    targetVector = corner - pose[3:]
+    targetVector = hmRPYP(0, 0, -90*brickNo, np.array([0, 0, 0]))[:3, :3].dot(targetVector.reshape(-1, 1))[:-1]
+    return yaw, targetVector
+
+walkThreadRunning = False
 
 if __name__ == "__main__":
-    # ---- Create a figure object ----
-    fig0 = plt.figure(0)
-    ax_fig0 = fig0.add_subplot(111, projection='3d')
-    ax_fig0.set_xlabel('X')
-    ax_fig0.set_ylabel('Y')
-    ax_fig0.set_zlabel('Z')
-    
-    ax_fig0.set_xlim([-0.5, 1.0])
-    ax_fig0.set_ylim([-0.75, 0.75])
-    ax_fig0.set_zlim([0, 1.5])
-    
-    # ---- Initialize the tags as an object ----
-    '''
-    poseTags = np.array([[14, 90, -90, 0, 0.50, 0.22, 0.13],
-                         [16, 90, -90, 0, 0.50, 0.11, 0.13],
-                         [17, 90, -90, 0, 0.50, 0.00, 0.13],
-                         [19, 90, -90, 0, 0.50, -0.11, 0.13]])
-    '''
-    # poses of the larger fixed tags.
-    '''
-    poseTags = np.array([[3, 90, -90, 0, 1.164, 0, 0.17],
-                         [1, 90, 0, 0, 0.895, 1.175, 0.17],
-                         [0, 90, 90, 0, -0.376, 0.78, 0.17],
-                         [2, 90, 180, 0, 0, -0.35, 0.17]])
-    '''
 
-    poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
-                     [3, 90, -90, 0, 0.994 + 0.265 - 0.10, 0.172 + 0.022, 0.055 + 0.172/2],
-                     [5, 90, -90, 0, 0.994 + 0.265 - 0.10, -(0.172 + 0.022), 0.055 + 0.172/2],
-                     [7, 90, 0, 0, 0.994 - 0.20, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
-                     [6, 90, 0, 0, 0.994 - 0.20 + 0.172 + 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
-                     [1, 90, 0, 0, 0.994 - 0.20 - 0.172 - 0.022, 0.995 + 0.267 - 0.10, 0.055 + 0.172/2],
-                     [0, 90, 90, 0, -0.376, 0.78, 0.17],
-                     [2, 90, 180, 0, 0, -0.35, 0.17]])
-    
-    myTags = landmarks(hmRPYP, poseTags, ax_fig0)  # tags use RPYP pose.
-
-    '''
-    for _, pose in enumerate(myTags.poses):
-            drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
-            drawRigidBody(myTags.hm(*pose[1:4], pose[4:]).dot(myTags.vertices), myTags.ax)
-    '''
-
-    # ---- Define a pseudo control input series ----
-    '''
-    controls = np.array([[0.4, 0.4, 0.4, 0.4],
-                         [90, 90, 90, 90]])
-    '''
-    controls = np.array([[0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
-                         [10, -10, -5, -5, 2, -2, 6, -6, 7]])
-    
-    controls[0] = controls[0] + np.random.normal(0, 0.02, 9)
-    controls[1] = controls[1] + np.random.normal(0, 1, 9)
-
-    # ---- Instantiate the robot class ----
-    myRobot = robot(hmRPYG, ax_fig0, poseTags)
-    poseRecord = np.zeros((1, 6))
-
-    # ---- Pseudo control update ----
-    '''
-    for i, ctrl in enumerate(controls.T):
-        myRobot.controlUpdate(ctrl)
-        myRobot.poseUpdate()
-        np.vstack((poseRecord, myRobot.updatedEstimate))
-    '''
+    # import detection module. If this is not within MAIN, this script will not be able to be imported.
+    import apriltag_video_picamera4 as avp
+    # ---- initiate a apriltag detetcion threading func ----
+    def apriltagDetectionThreadFunc():
+        avp.apriltag_video(print_log = False, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs, display_stream=False, output_stream = False)
 
     # ---- Apriltag measurement update ----
     apriltagDetectionThread = threading.Thread(target=apriltagDetectionThreadFunc)
@@ -536,35 +563,52 @@ if __name__ == "__main__":
     odometryReadThread = threading.Thread(target=odometryRead)
     odometryReadThread.start()
     '''
-	
-    # data sender init.
-    PC_IP = "10.50.30.140"  # should be updated DAILY!!!
-    PC_Port = 52000
-    poseSender = UDPSender(PC_IP, PC_Port)
-
-    # store the previous pose (control sending speed)
-    previousPose = np.zeros(6).astype('float')
 
     try:  
         # myRobot.forward()
+
+
         while(1):
             # myRobot.odometryUpdate(*readIMU())
             if avp.resultsGlobal != []:
                 myRobot.measurementUpdate(avp.resultsGlobal)
                 if not np.all(myRobot.measurement.copy() == previousPose.copy()):  
                     # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
-                    print("Measurement at {} : {}".format(time.time(), myRobot.measurement))
+                    # print("Measurement at {} : {}".format(time.time(), myRobot.measurement))
                     poseSender.send(np.append(time.time(), myRobot.measurement.copy()))  # send the pose array.
                     previousPose = myRobot.measurement.copy()  # store the previous pose.
+                    yawInTag, targetVector = checkTurning(myRobot.trajectoryNo, myRobot.measurement, trajectory)
+                    targetVector *= 100  # transform to cm
+                    yawInTag += boardBiasesYaw[myRobot.trajectoryNo]
+                    turningPose = np.append(yawInTag, targetVector.flatten())
+                    print(turningPose)
+                    fl.robotPose = turningPose
+                    # print(yawInTag, targetVector)
+                    # np.savetxt('robotPose.csv', turningPose, delimiter=',')
+                    # print(turningPose)
+                    time.sleep(0.1)
+                    if not walkThreadRunning:
+                        # from Yao's code.
+                        fl.walkThread.start()
+                        print('walk Thread start')
+                        time.sleep(2)
+                        walkThreadRunning = True
+            time.sleep(0.1)
+
 
     except KeyboardInterrupt:
         
         # myRobot.stopFB()
         # Kill the threads.
         avp.aptIsRunning = False
+        walkThreadRunning = False
         apriltagDetectionThread.join()
+        fl.walkThread.join()
         # odometryReadIsRunning = False
         # odometryReadThread.join()
+        print('STOOOOOOOOOOOOOOOOOOOOOP')
+        fl.iswalk=0
         poseSender.close()
         print("exited main")
         plt.close()
+        ser.close()
