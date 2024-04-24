@@ -3,7 +3,7 @@
 import os
 os.path.join('/home/pi/.local/lib/python3.11/site-packages')
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+# from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import threading
@@ -467,8 +467,8 @@ ax_fig0.set_ylim([-0.75, 0.75])
 ax_fig0.set_zlim([0, 1.5])
 
 # ---- Initialize the tags as an object ----
-boardBiasesX = np.array([0.005, 0.025, 0.007, 0.0])  # 0.018
-boardBiasesY = np.array([0.02, -0.025, 0.0, 0.02])
+boardBiasesX = np.array([0.002, 0, 0.007, 0.0])  # 0.002
+boardBiasesY = np.array([0.005, 0, 0.0, 0.03])  # 0.005, 
 boardBiasesYaw = np.array([-1.5, -1, 0, 0])
 
 poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
@@ -485,6 +485,7 @@ poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
                  [11, 90, 180, 0, -(0.172 + 0.022), -0.35, 0.055 + 0.172/2]])
 
 # adjust the biases of tags.
+
 poseTags[0:3, 4] += boardBiasesX[0]
 poseTags[3:6, 5] += boardBiasesX[1]
 poseTags[6:9, 4] += boardBiasesX[2]
@@ -513,7 +514,7 @@ myRobot = robot(hmRPYG, ax_fig0, poseTags)
 poseRecord = np.zeros((1, 6))
 
 # data sender init.
-PC_IP = "10.50.9.219"  # should be updated DAILY!!!
+PC_IP = "10.50.5.243"  # should be updated DAILY!!!
 PC_Port = 52000
 poseSender = UDPSender(PC_IP, PC_Port)
 
@@ -567,7 +568,6 @@ if __name__ == "__main__":
     try:  
         # myRobot.forward()
 
-
         while(1):
             # myRobot.odometryUpdate(*readIMU())
             if avp.resultsGlobal != []:
@@ -587,28 +587,40 @@ if __name__ == "__main__":
                     # np.savetxt('robotPose.csv', turningPose, delimiter=',')
                     # print(turningPose)
                     time.sleep(0.1)
+                    
                     if not walkThreadRunning:
                         # from Yao's code.
                         fl.walkThread.start()
                         print('walk Thread start')
                         time.sleep(2)
                         walkThreadRunning = True
+                    
             time.sleep(0.1)
 
 
     except KeyboardInterrupt:
         
         # myRobot.stopFB()
-        # Kill the threads.
+
+        # ---- Kill the Apriltag threads. ----
         avp.aptIsRunning = False
-        walkThreadRunning = False
         apriltagDetectionThread.join()
-        fl.walkThread.join()
+
+        # ---- Kill the odometry update threads. ---- 
         # odometryReadIsRunning = False
         # odometryReadThread.join()
-        print('STOOOOOOOOOOOOOOOOOOOOOP')
+
+        # ---- control the walking thread ----
+        
+        walkThreadRunning = False
+        fl.walkThread.join()
         fl.iswalk=0
+        print('STOOOOOOOOOOOOOOOOOOOOOP')
+        
+
+        # ---- Close the WiFi data sender ----
         poseSender.close()
+        
         print("exited main")
         plt.close()
         ser.close()
