@@ -31,12 +31,14 @@ video_writer = cv2.VideoWriter(video_name, codec, fps, (640, 480), isColor = Tru
 
 # new Mar 19, store the detection result as a global.
 resultsGlobal = []
+frameGlobal = np.array([])
+
 ################################################################################
 
 def apriltag_video(output_stream=True,
                    display_stream=True,
                    detection_window_name='AprilTag',
-                   tagsize = 0.0790,  # 0.0790 meters for the smaller ones; 0.1600 meters for the larger ones.
+                   tagsize = 0.1750,  # meters
                    cameraparams = np.array([1269.9875*640/2592, 1266.71028*480/1944, 1273.97291*640/2592, 989.41452*480/1944]),
                    cameraMatrix = None,
                    distCoeffs = None,
@@ -54,7 +56,7 @@ def apriltag_video(output_stream=True,
     #print(metadata["ExposureTime"], metadata["AnalogueGain"])
 
     
-    global tag_info, aptIsRunning, resultsGlobal
+    global tag_info, aptIsRunning, resultsGlobal, frameGlobal
     
     parser = ArgumentParser(description='Detect AprilTags from video stream.')
     apriltag.add_arguments(parser)
@@ -68,6 +70,7 @@ def apriltag_video(output_stream=True,
         frame = np.array(picam2.capture_array()) # returns normal distorted image
         frame = calibrate_frame(frame, cameraMatrix, distCoeffs)  # abnormaly distorted, but can be used independently
         overlay = frame
+        frameGlobal = frame  # for zh_robotPose.py
         
         # new Feb 29, while aptIsRunning add one for each detected frames
         number_of_frames=number_of_frames+1
@@ -106,7 +109,7 @@ def apriltag_video(output_stream=True,
                 # y-axis : pointing upwards, positive if looked from the right
                 # x-axis : pointing to the right, positive if looked from the above
                 eulerAngles = rotationMatrix.as_euler('zyx', degrees = True) 
-                # eulerAngles = rotationMatrix.as_euler('xyz', degrees = True)
+                # eulerAngles = rotationMatrix.as_euler('yzx', degrees = True)
                 
                 # store the values in the dict
                 tag_info = np.vstack((tag_info, np.array([result.tag_id, distance, eulerAngles[0], eulerAngles[1], eulerAngles[2]])))

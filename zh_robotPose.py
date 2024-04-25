@@ -15,6 +15,7 @@ import re
 import socket
 import pickle
 import final_localization as fl
+from hp_LineTracking import LineTracking
 
 # from WAVESHARE, establish serial connection.
 def connect_serial(port, baudrate):
@@ -253,6 +254,7 @@ class robot():
         # self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
         # drawRigidBody(self.body_verticesGround, self.ax)
 
+
     def measurementUpdate(self, results, useCalibration = True):
         # TODO: map to the body of dog.
 
@@ -467,8 +469,8 @@ ax_fig0.set_ylim([-0.75, 0.75])
 ax_fig0.set_zlim([0, 1.5])
 
 # ---- Initialize the tags as an object ----
-boardBiasesX = np.array([0.002, 0, 0.007, 0.0])  # 0.002
-boardBiasesY = np.array([0.005, 0, 0.0, 0.03])  # 0.005, 
+boardBiasesX = np.array([0.002, 0, 0.007, -0.013])  
+boardBiasesY = np.array([0.005, 0, 0.0, 0.03])  
 boardBiasesYaw = np.array([-1.5, -1, 0, 0])
 
 poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
@@ -514,7 +516,7 @@ myRobot = robot(hmRPYG, ax_fig0, poseTags)
 poseRecord = np.zeros((1, 6))
 
 # data sender init.
-PC_IP = "10.50.5.243"  # should be updated DAILY!!!
+PC_IP = "10.50.29.100"  # should be updated DAILY!!!
 PC_Port = 52000
 poseSender = UDPSender(PC_IP, PC_Port)
 
@@ -565,6 +567,9 @@ if __name__ == "__main__":
     odometryReadThread.start()
     '''
 
+    # ---- Initialize the LineTracking Class ----
+    lineTracking = LineTracking()
+
     try:  
         # myRobot.forward()
 
@@ -575,10 +580,16 @@ if __name__ == "__main__":
                 if not np.all(myRobot.measurement.copy() == previousPose.copy()):  
                     # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
                     # print("Measurement at {} : {}".format(time.time(), myRobot.measurement))
+
+                    # ---- Send Data via WiFi ----
                     poseSender.send(np.append(time.time(), myRobot.measurement.copy()))  # send the pose array.
+
+                    # ---- Calculate Params for Walking ---- 
                     previousPose = myRobot.measurement.copy()  # store the previous pose.
                     yawInTag, targetVector = checkTurning(myRobot.trajectoryNo, myRobot.measurement, trajectory)
                     targetVector *= 100  # transform to cm
+                    # ---- Pass Params to final_localization.py ----
+                    # turningPose[-1] = lineTracking.run(avp.frameGlobal)  # horizontal offset from the center line.
                     yawInTag += boardBiasesYaw[myRobot.trajectoryNo]
                     turningPose = np.append(yawInTag, targetVector.flatten())
                     print(turningPose)
@@ -590,6 +601,7 @@ if __name__ == "__main__":
                     
                     if not walkThreadRunning:
                         # from Yao's code.
+                        # fl.reset()
                         fl.walkThread.start()
                         print('walk Thread start')
                         time.sleep(2)
