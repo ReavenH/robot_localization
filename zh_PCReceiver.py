@@ -71,6 +71,7 @@ if __name__ == "__main__":
             plt.plot(trackInner[0, :], trackInner[1, :], trackInner[2, :], color = 'k')
             plt.plot(trackOuter[0, :], trackOuter[1, :], trackOuter[2, :], color = 'k')
             drawGround(hmRPYG(*receivedArray[:3], receivedArray[3:]), ax_fig0, "")
+            drawGround(hmRPYG(0, 0, 0, np.array([0, 0, 0])), ax_fig0, "Home")
             # print("Received Array: {}, Is Numpy Array: {}, Size of Message: {} Bytes".format(receivedArray, isinstance(receivedArray, np.ndarray), sys.getsizeof(receivedArray)))
             # time.sleep(2)
 

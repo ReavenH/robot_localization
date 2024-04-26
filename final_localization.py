@@ -12,7 +12,7 @@ import serial
 import threading
 import re
 import sys
-
+import matplotlib.pyplot as plt
 # sys.path.append("/home/pi/WAVEGO/RPi/small_function_group/AprilTag/scripts")
 '''
 import apriltag_video_picamera2 as avp
@@ -105,7 +105,7 @@ def is_float(s):
         return False
 '''
 waveStatus = WaveStatus.STANDING_DETECT_START
-robotPose = []
+
 
 #YAO, 3.16.2024, add threading of walking on the board
 def WalkOnBoard():
@@ -113,6 +113,7 @@ def WalkOnBoard():
 	global isfront
 	global iswalk
 	global waveStatus
+	global robotPose
 	last_time = time.time()
 	while iswalk:
 		################################### GET APRIL TAG DATA #################################
@@ -127,17 +128,13 @@ def WalkOnBoard():
 		x_distance = round(float(tag_info[0][4]),3)
         '''
 
-		robotPose = np.loadtxt("/home/pi/WAVEGO/RPi/small_function_group/AprilTag/scripts/robotPose.csv", delimiter=',')
-		print("robotPose {}".format(robotPose))
-		yaw = round(robotPose[0].copy(), 3)
-		z_distance = round(robotPose[2].copy(), 3)
-		x_distance = round(robotPose[1].copy(), 3)
+		
 
 		## mean value filter the z_distance
 		#z_bias = 1.5
-		z_bias = 0
-		z_distance_filter.add_data_point(z_distance)
-		z_distance_filtered = z_distance_filter.get_filtered_value()+z_bias
+		# z_bias = 0
+		# z_distance_filter.add_data_point(z_distance)
+		# z_distance_filtered = z_distance_filter.get_filtered_value()+z_bias
 		#print("yaw is: ",yaw, " x distance is: ",x_distance,"z distance is: ",z_distance)
 		
 		#write out data as file
@@ -151,6 +148,10 @@ def WalkOnBoard():
 		
 		if waveStatus == WaveStatus.STANDING_DETECT_START:
 			print('Standing Detect Start')
+			#print("robotPose {}".format(robotPose))
+			yaw = - round(robotPose[0].copy(), 3)
+			z_distance = round(robotPose[2].copy(), 3)
+			x_distance = round(robotPose[1].copy(), 3)
 			z_distance_acc = z_distance		#accumulate the z_distance
 			yaw_acc = yaw
 			x_distance_acc = x_distance
@@ -160,16 +161,24 @@ def WalkOnBoard():
 			continue
 			
 		if waveStatus == WaveStatus.STANDING_DETECTING:
+			
+			#print("robotPose {}".format(robotPose))
+			yaw = - round(robotPose[0].copy(), 3)
+			z_distance = round(robotPose[2].copy(), 3)
+			x_distance = round(robotPose[1].copy(), 3)
 			z_distance_acc += z_distance		#accumulate the z_distance
 			x_distance_acc += x_distance		#accumulate the z_distance
 			yaw_acc += yaw
-			z_dis_count += 1					#count till 20 times	
-			if z_dis_count == 20:				#already collect 20 z_distance data
-				steady_z_distance = z_distance_acc / 20 + 1 		#calculate the mean z_distance
-				steady_yaw = yaw_acc / 20
-				steady_x_distance = x_distance_acc / 20
+			z_dis_count += 1					#count till 20 times
+			num_cnt = 40	
+			if z_dis_count == num_cnt:				#already collect 20 z_distance data
+				steady_z_distance = z_distance_acc / num_cnt + 1 		#calculate the mean z_distance
+				steady_yaw = yaw_acc / num_cnt
+				steady_x_distance = x_distance_acc / num_cnt
 				waveStatus = WaveStatus.PLAN_NEXT_STEP
 				print("steady_yaw is: ",steady_yaw," steady_x distance is: ",steady_x_distance," steady_z distance is: ",steady_z_distance)
+				print(' ')
+				print(' ')
 			continue
 
 ############################################### PLANNING ######################################
@@ -179,8 +188,8 @@ def WalkOnBoard():
 			distance_climb_start = 61
 			distance_climb_end = 44
 			
-			distance_rotate_prepare = 3
-			distance_rotate_start = 1
+			distance_rotate_prepare = 7
+			distance_rotate_start = 5.5
 			isfront = 5
 			
 			if steady_x_distance>distance_climb_start or (steady_x_distance<distance_climb_end and steady_x_distance>20): 		#DO NOT TURN WHEN CLIMBING OR DUWN STAIRS
@@ -208,17 +217,54 @@ def WalkOnBoard():
 
 				
 			############################  CLIMB  ################################
+			
 			if distance_climb_prepare>=steady_x_distance and steady_x_distance>=distance_climb_start:
-				dis_diff = max(steady_x_distance - distance_climb_start,1)*10
-				if steady_z_distance>-1 and steady_z_distance<1:
-						freewalk(0.0,dis_diff)
+				if steady_yaw>5.0:
+					#left5()
+					freeturn(min(max(steady_yaw*1.5,7.5),15))
+					waveStatus = WaveStatus.ADJUST_ROTATION_LEFT
+					continue
+				elif steady_yaw<-5.0:
+					#right5()
+					freeturn(max(min(steady_yaw*1.5,-7.5),-15))
+					waveStatus = WaveStatus.ADJUST_ROTATION_RIGHT
+					continue
 				else:
-					direction_deg = math.degrees(math.atan2(steady_z_distance,isfront))
-					freewalk(max(min(direction_deg+steady_yaw/2,15),-15),dis_diff)
-				last_time = current_time
-				waveStatus = WaveStatus.FREE_WALKING
-				continue
-			elif distance_climb_start >= steady_x_distance and steady_x_distance >= distance_climb_end: 			#freeclimb
+					dis_diff = max(steady_x_distance - distance_climb_start,1)*10
+					if steady_z_distance>-1 and steady_z_distance<1:
+							freewalk(0.0,dis_diff)
+					else:
+						direction_deg = math.degrees(math.atan2(steady_z_distance,isfront))
+						freewalk(max(min(direction_deg+steady_yaw/2,15),-15),dis_diff)
+					last_time = current_time
+					waveStatus = WaveStatus.FREE_WALKING
+					continue
+			#if just above the distance_climb_prepare, could still adjust the yaw
+			elif distance_climb_start>= steady_x_distance and steady_x_distance >= distance_climb_start-1: 			#freeclimb
+				if steady_yaw>5.0:
+					#left5()
+					freeturn(min(max(steady_yaw*1.5,7.5),15))
+					waveStatus = WaveStatus.ADJUST_ROTATION_LEFT
+					continue
+				elif steady_yaw<-5.0:
+					#right5()
+					freeturn(max(min(steady_yaw*1.5,-7.5),-15))
+					waveStatus = WaveStatus.ADJUST_ROTATION_RIGHT
+					continue
+				else:
+					if steady_z_distance > -1 and steady_z_distance < 1:
+						if isfront >0:
+							freeclimb(0.0)
+						else:
+							freeclimb(-180.0)
+					else:
+						direction_deg = math.degrees(math.atan2(steady_z_distance,isfront))
+						freeclimb(max(min(direction_deg+steady_yaw/2,15),-15))
+					last_time = current_time
+					waveStatus = WaveStatus.FREE_CLIMBING
+					continue
+			#keep climbing
+			elif distance_climb_start-1 >= steady_x_distance and steady_x_distance >= distance_climb_end: 			#freeclimb
 				if steady_z_distance > -1 and steady_z_distance < 1:
 					if isfront >0:
 						freeclimb(0.0)
@@ -263,9 +309,10 @@ def WalkOnBoard():
 					#freewalk(180)
 					
 					reset()
-					time.sleep(2)
+					time.sleep(10)
 					
-					freewalk(90)
+					freewalk(90,30)
+					time.sleep(1)
 					waveStatus = WaveStatus.SHIFT_LEFT
 					continue	
 			else:											#freewalk
@@ -277,6 +324,7 @@ def WalkOnBoard():
 				else:
 					direction_deg = math.degrees(math.atan2(steady_z_distance,isfront))
 					freewalk(max(min(direction_deg+steady_yaw/2,15),-15))
+					#freewalk(max(min(direction_deg+steady_yaw/2,10),-10))
 				last_time = current_time
 				waveStatus = WaveStatus.FREE_WALKING
 				continue			
@@ -414,6 +462,7 @@ def startwalk():
 def freewalk(degree,distance=30):
 	print('freewalk direction: ',degree,' distance: ',distance)
 	dataCMD = json.dumps({'var':"freewalk", 'val':degree, 'dis':distance})
+	#dataCMD = json.dumps({'var':"freetrot", 'val':degree*2, 'dis':distance})
 	ser.write(dataCMD.encode())
 	time.sleep(0.1)
 	
@@ -494,6 +543,8 @@ def buzzerCtrl(buzzerCtrl, cmdInput):
 	dataCMD = json.dumps({'var':"buzzer", 'val':buzzerCtrl})
 	ser.write(dataCMD.encode())
 
+print("Imported final_localization.")
+robotPose = []
 
 if __name__ == '__main__':
 	try:

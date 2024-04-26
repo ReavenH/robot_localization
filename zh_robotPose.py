@@ -16,6 +16,7 @@ import socket
 import pickle
 import final_localization as fl
 from hp_LineTracking import LineTracking
+import cv2
 
 # from WAVESHARE, establish serial connection.
 def connect_serial(port, baudrate):
@@ -516,7 +517,7 @@ myRobot = robot(hmRPYG, ax_fig0, poseTags)
 poseRecord = np.zeros((1, 6))
 
 # data sender init.
-PC_IP = "10.50.29.100"  # should be updated DAILY!!!
+PC_IP = "10.50.9.237"  # should be updated DAILY!!!
 PC_Port = 52000
 poseSender = UDPSender(PC_IP, PC_Port)
 
@@ -554,6 +555,7 @@ if __name__ == "__main__":
     # ---- Apriltag measurement update ----
     apriltagDetectionThread = threading.Thread(target=apriltagDetectionThreadFunc)
     apriltagDetectionThread.start()
+    time.sleep(1)
 
     # ---- Odometry readings from serial ---- 
     # define a serial read function that returns dyaw and dx.
@@ -568,16 +570,32 @@ if __name__ == "__main__":
     '''
 
     # ---- Initialize the LineTracking Class ----
-    lineTracking = LineTracking()
+    # lineTracking = LineTracking()
 
     try:  
         # myRobot.forward()
 
         while(1):
+            # ---- Update Odometry ----
             # myRobot.odometryUpdate(*readIMU())
+
+            # ---- Line Recognition ----
+            '''
+            frameRead = avp.frameGlobal.copy()
+            yOffsetLine = lineTracking.run(frameRead.copy())  # horizontal offset from the center line.
+            # print("Time: {} \t yOffsetLine: {} \t No. Frame: {} \t Shape: {} \t Var of Frame: {} \t Type: {} \t".format(time.time(), yOffsetLine, avp.frameCountGlobal, avp.frameGlobal.shape, np.var(avp.frameGlobal[:, :, ::-1]), frameRead.dtype))
+            print("yOffsetLine: {}".format(yOffsetLine))
+            '''
+            # plt.imsave("./TESTIMGS/IMG"+str(avp.frameCountGlobal)+".png", avp.frameGlobal[:, :, ::-1])
+            # plt.imshow(avp.frameGlobal[:, :, ::-1])
+           
             if avp.resultsGlobal != []:
+
+                # ---- Update Measurement ----
                 myRobot.measurementUpdate(avp.resultsGlobal)
+
                 if not np.all(myRobot.measurement.copy() == previousPose.copy()):  
+                    # ---- Print Debug Info ----
                     # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
                     # print("Measurement at {} : {}".format(time.time(), myRobot.measurement))
 
@@ -588,25 +606,27 @@ if __name__ == "__main__":
                     previousPose = myRobot.measurement.copy()  # store the previous pose.
                     yawInTag, targetVector = checkTurning(myRobot.trajectoryNo, myRobot.measurement, trajectory)
                     targetVector *= 100  # transform to cm
+
                     # ---- Pass Params to final_localization.py ----
-                    # turningPose[-1] = lineTracking.run(avp.frameGlobal)  # horizontal offset from the center line.
                     yawInTag += boardBiasesYaw[myRobot.trajectoryNo]
                     turningPose = np.append(yawInTag, targetVector.flatten())
-                    print(turningPose)
+                    # turningPose[-1] = yOffsetLine  # use line detection offset
+                    # print(turningPose)
                     fl.robotPose = turningPose
                     # print(yawInTag, targetVector)
                     # np.savetxt('robotPose.csv', turningPose, delimiter=',')
                     # print(turningPose)
                     time.sleep(0.1)
-                    
+                    '''
                     if not walkThreadRunning:
                         # from Yao's code.
                         # fl.reset()
+                        
                         fl.walkThread.start()
                         print('walk Thread start')
                         time.sleep(2)
                         walkThreadRunning = True
-                    
+                    '''
             time.sleep(0.1)
 
 
@@ -623,12 +643,12 @@ if __name__ == "__main__":
         # odometryReadThread.join()
 
         # ---- control the walking thread ----
-        
+        '''
         walkThreadRunning = False
         fl.walkThread.join()
         fl.iswalk=0
         print('STOOOOOOOOOOOOOOOOOOOOOP')
-        
+        '''
 
         # ---- Close the WiFi data sender ----
         poseSender.close()

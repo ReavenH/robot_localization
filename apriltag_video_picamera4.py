@@ -32,6 +32,7 @@ video_writer = cv2.VideoWriter(video_name, codec, fps, (640, 480), isColor = Tru
 # new Mar 19, store the detection result as a global.
 resultsGlobal = []
 frameGlobal = np.array([])
+frameCountGlobal = np.array([])
 
 ################################################################################
 
@@ -56,7 +57,7 @@ def apriltag_video(output_stream=True,
     #print(metadata["ExposureTime"], metadata["AnalogueGain"])
 
     
-    global tag_info, aptIsRunning, resultsGlobal, frameGlobal
+    global tag_info, aptIsRunning, resultsGlobal, frameGlobal, frameCountGlobal
     
     parser = ArgumentParser(description='Detect AprilTags from video stream.')
     apriltag.add_arguments(parser)
@@ -67,13 +68,14 @@ def apriltag_video(output_stream=True,
         
     while aptIsRunning:
             
-        frame = np.array(picam2.capture_array()) # returns normal distorted image
-        frame = calibrate_frame(frame, cameraMatrix, distCoeffs)  # abnormaly distorted, but can be used independently
-        overlay = frame
-        frameGlobal = frame  # for zh_robotPose.py
+        frame = np.array(picam2.capture_array()).copy() # returns normal distorted image
+        frame = calibrate_frame(frame, cameraMatrix, distCoeffs).copy()  # abnormaly distorted, but can be used independently
+        overlay = frame.copy()
+        frameGlobal = frame.copy()  # for zh_robotPose.py
         
         # new Feb 29, while aptIsRunning add one for each detected frames
         number_of_frames=number_of_frames+1
+        frameCountGlobal = number_of_frames
             
         results, overlay = apriltag.detect_tags(frame,
                                                 detector,
