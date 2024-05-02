@@ -1,7 +1,14 @@
 import cv2
 import numpy as np
 import math
+# change to the frame
+image = cv2.imread('IMG221.png')
 
+
+#print(image.shape)
+#print(isinstance(image,np.ndarray))
+
+# code start from here
 class LineTracking:
     def __init__(self):
         self.line_centerx = -1
@@ -50,8 +57,6 @@ class LineTracking:
     def run(self,img):
         global draw_color, line_centerx
 
-        # print("Inside, Var: {}".format(np.var(img)))
-
         size = (640, 480)
         # img_copy = img.copy()
         img_h, img_w = img.shape[:2]
@@ -89,11 +94,9 @@ class LineTracking:
                     closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, np.ones((6, 6), np.uint8))  # 闭运算
             # closed[:, 0:160] = 0
             # closed[:, 480:640] = 0
-            result = 0
             if self.target_color == '' or self.target_color == 'None' or self.target_color == None:
                 line_centerx = -2
-                # return img
-                result = 10
+                return 10
             cnts = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)[-2]  # 找出所有轮廓
             cnt_large, area = self.getAreaMaxContour(cnts)  # 找到最大面积的轮廓
             if cnt_large is not None:  # 如果轮廓不为空
@@ -130,7 +133,7 @@ class LineTracking:
         #print(img_middle_x)
 
         # return the approximate distance to the middle of the image
-        # result=0
+        result=0
         if(line_centerx-img_middle_x<10 and line_centerx-img_middle_x>=-10):
             result=0
         elif(line_centerx-img_middle_x<30 and line_centerx-img_middle_x>=10):
@@ -143,8 +146,108 @@ class LineTracking:
             result = -1
         elif (line_centerx - img_middle_x < -30 and line_centerx - img_middle_x >= -50):
             result = -2
-        elif (line_centerx - img_middle_x < -50 and line_centerx - img_middle_x >= -320):
-            result= -3 
-        elif (line_centerx - img_middle_x < -320):
-            result = -99       
-        return - result
+        elif (line_centerx - img_middle_x < -50):
+            result=-3
+        return result
+
+    # get the middle of the largest region by the average position of all red points
+    def get_average_red_position(self,img):
+        # get the middle of image in x dimension
+        img_h, img_w = img.shape[:2]
+        img_middle_x = img_w / 2
+        # 定义红色的阈值范围
+        lower_red = np.array([0, 0, 30])  # 可根据实际情况调整
+        upper_red = np.array([20, 20, 70])  # 可根据实际情况调整
+        # 根据阈值构建掩模
+        mask = cv2.inRange(img, lower_red, upper_red)
+        # 寻找掩模中的轮廓
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # 初始化变量来跟踪最大面积及其轮廓
+        max_area = 0
+        max_contour = None
+
+        cx=0
+        cy=0
+
+        # 遍历所有轮廓，找到最大的一个
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > max_area:
+                max_area = area
+                max_contour = contour
+
+        # 检查是否找到了有效轮廓
+        if max_contour is not None:
+            # 计算轮廓的质心
+            M = cv2.moments(max_contour)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+            else:
+                cx, cy = 0, 0  # 防止除以零
+
+            #print("Centroid of the largest contour: (", cx, ",", cy, ")")
+
+            # 绘制最大轮廓和质心
+            output_image = cv2.drawContours(img.copy(), [max_contour], -1, (0, 255, 0), 3)
+            cv2.circle(output_image, (cx, cy), 5, (255, 0, 0), -1)  # 用蓝色点标记质心
+            #cv2.imshow("Largest Area with Centroid", output_image)
+            #cv2.waitKey(0)
+            #cv2.destroyAllWindows()
+
+        line_centerx=cx
+        result = 0
+        if (line_centerx - img_middle_x < 10 and line_centerx - img_middle_x >= -10):
+            result = 0
+        elif (line_centerx - img_middle_x < 30 and line_centerx - img_middle_x >= 10):
+            result = 1
+        elif (line_centerx - img_middle_x < 50 and line_centerx - img_middle_x >= 30):
+            result = 2
+        elif (line_centerx - img_middle_x >= 50):
+            result = 3
+        elif (line_centerx - img_middle_x < -10 and line_centerx - img_middle_x >= -30):
+            result = -1
+        elif (line_centerx - img_middle_x < -30 and line_centerx - img_middle_x >= -50):
+            result = -2
+        elif (line_centerx - img_middle_x < -50):
+            result = -3
+
+        return cx,cy,result
+
+    def get_red_line_tilt_angle(self,img):
+        cx,cy,_=self.get_average_red_position(img)
+        #print(cx,cy)
+        # 获取图像的高度和宽度
+        img_h, img_w = img.shape[:2]
+
+        # 计算需要截取的区域
+        # 获取底部1/10的图像部分
+        start_row = int(9 * img_h / 10)  # 从这个纵坐标开始截取
+        end_row = img_h  # 到图像的底部
+
+        # 截取图像
+        bottom_part = img[start_row:end_row, 0:img_w]  # 截取底部1/10
+        under_cx,under_cy,_=self.get_average_red_position(bottom_part)
+        #print(under_cx,under_cy)
+
+        if(cx!=0 and cy!=0 and under_cx!=0 and under_cy!=0):
+            angle=np.arctan2((cy-under_cy),(cx-under_cx))* 180 / np.pi
+        else:
+            angle=181
+
+        return angle
+
+
+
+# the code ends here
+
+# test the result
+lt=LineTracking()
+#lt=LineTracking()
+#result=lt.run(image)
+cx,cy,result = lt.get_average_red_position(image)
+#print(result)
+#print(cx)
+print(result)
+

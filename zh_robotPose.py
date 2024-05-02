@@ -428,7 +428,7 @@ class brickMap():
 
     def place(self, pose):  # pose is a list len = 6.
         # TODO: detect collision and layer.
-        if self._viabilityDetect(pose) != True:  # if the pose of brick is viable.
+        if self._viabilityDetect(pose) == True:  # if the pose of brick is viable.
             self.map.append(pose)
             drawGround(hmRPYG(*pose[:3], pose[3:]), self.ax, "Brick ".join(str(len(self.map + 1))))  # len(list) returns the rows of a list (first dim).
             drawRigidBody(hmRPYG(*pose[:3], pose[3:]).dot(self.brickVertices), self.ax)
@@ -570,7 +570,7 @@ if __name__ == "__main__":
     '''
 
     # ---- Initialize the LineTracking Class ----
-    # lineTracking = LineTracking()
+    lineTracking = LineTracking()
 
     try:  
         # myRobot.forward()
@@ -580,12 +580,12 @@ if __name__ == "__main__":
             # myRobot.odometryUpdate(*readIMU())
 
             # ---- Line Recognition ----
-            '''
+            
             frameRead = avp.frameGlobal.copy()
-            yOffsetLine = lineTracking.run(frameRead.copy())  # horizontal offset from the center line.
+            _, _, yOffsetLine = lineTracking.get_average_red_position(frameRead.copy())  # horizontal offset from the center line.
             # print("Time: {} \t yOffsetLine: {} \t No. Frame: {} \t Shape: {} \t Var of Frame: {} \t Type: {} \t".format(time.time(), yOffsetLine, avp.frameCountGlobal, avp.frameGlobal.shape, np.var(avp.frameGlobal[:, :, ::-1]), frameRead.dtype))
             print("yOffsetLine: {}".format(yOffsetLine))
-            '''
+            
             # plt.imsave("./TESTIMGS/IMG"+str(avp.frameCountGlobal)+".png", avp.frameGlobal[:, :, ::-1])
             # plt.imshow(avp.frameGlobal[:, :, ::-1])
            

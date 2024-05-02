@@ -48,7 +48,7 @@ if __name__ == "__main__":
     try:
         while(True):
 
-            # depackage.
+            # depackage.       
             receivedArray, _ = receiver.receive_array()
             receivedStamp = receivedArray[0]
             receivedArray = receivedArray[1:]

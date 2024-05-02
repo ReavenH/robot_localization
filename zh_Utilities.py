@@ -98,8 +98,11 @@ def drawGround(pose, ax, label):
 
     # text
     ax.text(newOrigin[0], newOrigin[1], newOrigin[2] - 0.03, label, color = 'black')
+
+    '''
     plt.show()
     plt.pause(0.02)  # default 0.02
+    '''
 
 
 def drawRigidBody(vertices, ax):
@@ -109,7 +112,7 @@ def drawRigidBody(vertices, ax):
             [0, 4], [1, 5], [2, 6], [3, 7]]
     vertices = vertices[:3, :].T  # should be 8x3 if the rigid body is a rectangular prism.
     for link in links:
-        ax.plot3D(*zip(*vertices[link]), color="k", linewidth = 0.3)
+        ax.plot3D(*zip(*vertices[link]), color="k", linewidth = 0.8)
 
 class landmarks():
     def __init__(self, hm, poses, ax):
@@ -180,3 +183,69 @@ def calibratePose2D(yaw, trans):
     trans[-1] = trans[-1] * np.cos(yawRad)
 
     return yaw, trans
+
+def drawBrick(pose, vertices, ax):
+    x, y, z = hmRPYG(*pose[:3], pose[3:]).dot(vertices)[:3, :]
+    # print("x = {}, y = {}, z = {}:".format(x, y, z))
+
+    xx = np.linspace(np.min(x), np.max(x), 100)
+    yy = np.linspace(np.min(y), np.max(y), 100)
+    zz = np.linspace(np.min(z), np.max(z), 10)
+ 
+    # Parallel to the X-Y plane
+    xxGrid, yyGrid = np.meshgrid(xx, yy)
+    zzGrid = np.full_like(xxGrid, np.max(z))
+    ax.plot_surface(xxGrid, yyGrid, zzGrid, color = 'lightblue', alpha = 1, rasterized = True)
+    zzGrid = np.full_like(xxGrid, np.min(z))
+    ax.plot_surface(xxGrid, yyGrid, zzGrid, color = 'lightblue', alpha = 1, rasterized = True)
+
+    # Parallel to X-Z plane
+    xxGrid, zzGrid = np.meshgrid(xx, zz)
+    yyGrid = np.full_like(xxGrid, np.max(y))
+    ax.plot_surface(xxGrid, yyGrid, zzGrid, color = 'navy', alpha = 1, rasterized = True)
+    yyGrid = np.full_like(xxGrid, np.min(y))
+    ax.plot_surface(xxGrid, yyGrid, zzGrid, color = 'navy', alpha = 1, rasterized = True)
+
+    # Parallel to Y-Z plane
+    yyGrid, zzGrid = np.meshgrid(yy, zz)
+    xxGrid = np.full_like(yyGrid, np.max(x))
+    ax.plot_surface(xxGrid, yyGrid, zzGrid, color = 'navy', alpha = 1, rasterized = True)
+    xxGrid = np.full_like(yyGrid, np.min(x))
+    ax.plot_surface(xxGrid, yyGrid, zzGrid, color = 'navy', alpha = 1, rasterized = True)
+
+class brickMap():
+    def __init__(self, hm, ax) -> None:
+        '''
+        Init the class to store brick model and update the brick map.
+        '''
+        self.hm = hm
+        self.ax = ax
+        self.brickLength = 0.40 # meter
+        self.brickWidth = 0.20
+        self.brickThickness = 0.015
+        self.brickVertices = np.array([[0.5 * self.brickLength, 0.5 * self.brickLength, - 0.5 * self.brickLength, - 0.5 * self.brickLength, 
+                                        0.5 * self.brickLength, 0.5 * self.brickLength, - 0.5 * self.brickLength, - 0.5 * self.brickLength],
+                                       [0.5 * self.brickWidth, - 0.5 * self.brickWidth, - 0.5 * self.brickWidth, 0.5 * self.brickWidth, 
+                                        0.5 * self.brickWidth, - 0.5 * self.brickWidth, - 0.5 * self.brickWidth, 0.5 * self.brickWidth],
+                                       [0.5 * self.brickThickness, 0.5 * self.brickThickness, 0.5 * self.brickThickness, 0.5 * self.brickThickness, 
+                                        - 0.5 * self.brickThickness, - 0.5 * self.brickThickness, - 0.5 * self.brickThickness, - 0.5 * self.brickThickness],
+                                       [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
+        # self.map = np.zeros(6).astype('float')  # to store the poses of the bricks as maps.
+        self.map = np.array([])  # to utilize the append attribute of lists. len = No. of bricks.
+
+    def place(self, pose):  # pose is a list len = 6.
+        # TODO: detect collision and layer.
+        if self._viabilityDetect(pose) == True:  # if the pose of brick is viable.
+            self.map = np.append(self.map, pose).reshape(-1, 6)
+            # drawGround(hmRPYG(*pose[:3], pose[3:]), self.ax, "Brick ".join(str(len(self.map + 1))))  # len(list) returns the rows of a list (first dim).
+            drawRigidBody(hmRPYG(*pose[:3], pose[3:]).dot(self.brickVertices), self.ax)
+            drawBrick(pose, self.brickVertices, self.ax)
+            return True  #  to be passed to the robot class.
+        else:
+            print("Invalid Brick Pose")
+            return False  #  to be passed to the robot class.
+
+    def _viabilityDetect(self, pose) -> bool:  # pose is a list len = 6.
+        # TODO: the rule check function before placing bricks.
+        return True
+    
