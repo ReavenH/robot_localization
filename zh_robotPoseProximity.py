@@ -5,12 +5,14 @@ os.path.join('/home/pi/.local/lib/python3.11/site-packages')
 import matplotlib.pyplot as plt
 # from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import threading
 import time
 import calibrationfunc as cf
-import final_localization as fl
-from hp_LineTracking import LineTracking
 from zh_Utilities import robot, hmRPYG, ser, UDPSender, trajectory, poseTags, checkTurning, boardBiasesYaw
+# import final_localization as fl
+import hy_LineTracking as fl  # adapted final_localization using proximity sensors for horizontal offsets.
+from hp_LineTracking import LineTracking
 
 # ---- Create a figure object ----
 fig0 = plt.figure(0)
@@ -73,20 +75,18 @@ if __name__ == "__main__":
             # myRobot.odometryUpdate(*readIMU())
 
             # ---- Line Recognition ----
-            
+            '''
             frameRead = avp.frameGlobal.copy()
             yOffsetLine = lineTracking.run(frameRead.copy())  # horizontal offset from the center line.
             # print("Time: {} \t yOffsetLine: {} \t No. Frame: {} \t Shape: {} \t Var of Frame: {} \t Type: {} \t".format(time.time(), yOffsetLine, avp.frameCountGlobal, avp.frameGlobal.shape, np.var(avp.frameGlobal[:, :, ::-1]), frameRead.dtype))
-            # print("yOffsetLine: {}".format(yOffsetLine))
-            
+            print("yOffsetLine: {}".format(yOffsetLine))
+            '''
             # plt.imsave("./TESTIMGS/IMG"+str(avp.frameCountGlobal)+".png", avp.frameGlobal[:, :, ::-1])
             # plt.imshow(avp.frameGlobal[:, :, ::-1])
            
             if avp.resultsGlobal != []:
 
                 # ---- Update Measurement ----
-                # TODO: only update measurement when the avp.resultsGlobal is different from the previous one.
-
                 myRobot.measurementUpdate(avp.resultsGlobal)
 
                 if not np.all(myRobot.measurement.copy() == previousPose.copy()):  
@@ -105,9 +105,9 @@ if __name__ == "__main__":
                     # ---- Pass Params to final_localization.py ----
                     yawInTag += boardBiasesYaw[myRobot.trajectoryNo]
                     turningPose = np.append(yawInTag, targetVector.flatten())
-                    turningPose[-1] = yOffsetLine  # use line detection offset
+                    # turningPose[-1] = yOffsetLine  # use line detection offset
                     # print(turningPose)
-                    fl.robotPose = turningPose  # pass the pose to the thread.
+                    fl.robotPose = turningPose
                     # print(yawInTag, targetVector)
                     # np.savetxt('robotPose.csv', turningPose, delimiter=',')
                     # print(turningPose)

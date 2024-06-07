@@ -3,8 +3,7 @@ import socket
 import numpy as np
 import sys
 import matplotlib.pyplot as plt
-# from zh_robotPose import landmarks, poseTags, hmRPYG, hmRPYP, drawGround, drawRigidBody, robot
-from zh_Utilities import *
+from zh_Utilities import landmarks, brickMap, hmRPYG, hmRPYP, poseTags, drawBrick, drawGround, drawRigidBody
 import time
 
 # ---- Create a figure object ----
@@ -31,7 +30,7 @@ pseudoPoses[:, 3:] += np.random.normal(0, 0.01, size=(pseudoPoses.shape[0], 3))
 pseudoPoses[:, -1] = myBrickMap.brickThickness * 2.5 * myBrickMap.brickThickness
 # print(pseudoPoses)
 
-# create a map of bricks
+# create a map of bricks of the DEMO circle.
 brickPoses = np.array([[0, 0, 0, 0.3, 0, myBrickMap.brickThickness / 2],
                        [0, 0, 0, 0.7, 0, myBrickMap.brickThickness / 2],
                        [0, 0, 90, 0.8, 0.3, myBrickMap.brickThickness / 2], 
@@ -49,7 +48,7 @@ if __name__ == "__main__":
 
     try:
 
-        ax_fig0.view_init(elev=30, azim= -135)
+        ax_fig0.view_init(elev = 30, azim = -135)
 
         for _, pose in enumerate(myTags.poses):
             drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))

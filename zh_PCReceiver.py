@@ -3,23 +3,8 @@ import socket
 import numpy as np
 import sys
 import matplotlib.pyplot as plt
-# from zh_robotPose import landmarks, poseTags, hmRPYG, hmRPYP, drawGround, drawRigidBody, robot
-from zh_Utilities import *
+from zh_Utilities import landmarks, hmRPYG, hmRPYP, poseTags, drawBrick, drawGround, drawRigidBody, trackInner, trackOuter, PCReceiver
 import time
-
-class PCReceiver():
-    def __init__(self, local_port):
-        self.local_port = local_port
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(('0.0.0.0', self.local_port))  # to be decided.
-
-    def receive_array(self):
-        data, addr = self.sock.recvfrom(256)  # the message of 6 DoF pose takes up 152 Bytes.
-        array = pickle.loads(data)  # deserialize message
-        return array, addr
-
-    def close(self):
-        self.sock.close()
 
 if __name__ == "__main__":
 
