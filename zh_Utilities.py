@@ -11,7 +11,13 @@ import json
 import socket
 import re
 import pickle
+from OpenGL.GL import *
+from OpenGL.GLU import *
+import pygame
+from pygame.locals import *
 
+# temporarily skipped for omitting serial.
+'''
 # from WAVESHARE, establish serial connection.
 def connect_serial(port, baudrate):
     while True:
@@ -32,6 +38,38 @@ port = "/dev/ttyS0"
 baudrate = 115200
 ser = connect_serial(port, baudrate)
 
+def readIMU():
+    
+    # decode each line in the buffer.
+    try:
+        value_str = ser.readline().decode().strip()
+    except Exception as e:
+        print(f"Error reading from serial port: {e}")
+        return None, None, None
+ 
+    robot_time = re.search(r'Time: (\d+)', value_str)  # int
+    yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
+    dx = re.search(r'dx: (-?(\d+\.\d+|inf))', value_str)  # float
+
+    if robot_time:
+        # get the time in second
+        stamp = int(robot_time.group(1))
+    else:
+        stamp = None
+        
+    if yaw:
+        yaw_out = yaw.group(1)
+    else:
+        yaw_out = None
+        
+    if dx:
+        dx_out = dx.group(1)
+    else:
+        dx_out = None
+
+    print(stamp, yaw_out, dx_out)
+    return stamp, yaw_out, dx_out
+'''
 groundCoords = np.array([[1.0, 0.0, 0.0],
                          [0.0, 1.0, 0.0],
                          [0.0, 0.0, 1.0]])
@@ -131,6 +169,38 @@ def drawGround(pose, ax, label):
     plt.pause(0.02)  # default 0.02
     '''
 
+def drawGroundOG(pose):
+    '''
+    draw the 3D pose with respect to the ground coordinates
+    input: pose is the 4x4 array
+    rotation order: RPY, with respect to the ground coords
+    using OpenGL
+    '''
+
+    if(pose.shape != (4, 4)):
+        print("Wrong pose shape, exited")
+        return
+
+    newOrigin = pose[:-1, -1]  # the translation vector of pose, 3x1
+    groundUnivVecs = np.vstack((groundCoords * 0.05, np.ones((1, 3))))  # 4x3, padding
+    newUnitVecs = np.dot(pose, groundUnivVecs)[:-1, :]  # 4x3 -> 3x3
+    newCoordX = np.vstack((newOrigin, newUnitVecs[:, 0]))  # 2x3
+    newCoordY = np.vstack((newOrigin, newUnitVecs[:, 1]))
+    newCoordZ = np.vstack((newOrigin, newUnitVecs[:, 2]))
+
+    glLineWidth(3.0)
+    # draw lines with OpenGL
+    glBegin(GL_LINES)
+    glColor3f(1.0, 0.0, 0.0) # R
+    glVertex3dv(newCoordX[0])
+    glVertex3dv(newCoordX[1])
+    glColor3f(0.0, 1.0, 0.0) # G
+    glVertex3dv(newCoordY[0])
+    glVertex3dv(newCoordY[1])
+    glColor3f(0.0, 0.0, 1.0) # B
+    glVertex3dv(newCoordZ[0])
+    glVertex3dv(newCoordZ[1])
+    glEnd()
 
 def drawRigidBody(vertices, ax):
     # vertices is the 8 vertices of the robot rigid body.
@@ -140,6 +210,22 @@ def drawRigidBody(vertices, ax):
     vertices = vertices[:3, :].T  # should be 8x3 if the rigid body is a rectangular prism.
     for link in links:
         ax.plot3D(*zip(*vertices[link]), color="k", linewidth = 0.8)
+
+def drawRigidBodyOG(vertices):
+    # vertices is the 8 vertices of the robot rigid body.
+    links = [[0, 1], [1, 2], [2, 3], [3, 0],
+            [4, 5], [5, 6], [6, 7], [7, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7]]
+    vertices = vertices[:3, :].T  # should be 8x3 if the rigid body is a rectangular prism.
+
+    # draw with OpenGL
+    glLineWidth(1.5)
+    glBegin(GL_LINES)
+    for link in links:
+        for vertex in link:
+            glColor3f(0.0, 0.0, 0.0)
+            glVertex3dv(vertices[vertex])
+    glEnd()
 
 class robot():
     def __init__(self, hm, ax, landmarks): # hm is the 4x4 homogeneous matrix, for different rotation orders.
@@ -173,7 +259,7 @@ class robot():
         self.lastYaw = 0.0
         self.lastStamp = 0.0
         self.trajectoryNo = 0
-
+    '''
     def forward(speed=50):
         dataCMD = json.dumps({'var':"move", 'val':1})
         ser.write(dataCMD.encode())
@@ -188,7 +274,7 @@ class robot():
         dataCMD = json.dumps({'var':"move", 'val':3})
         ser.write(dataCMD.encode())
         print('robot-stop')	
-
+    '''
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
         self.initialEstimate = self.updatedEstimate
@@ -401,10 +487,8 @@ poseTags = np.array([[4, 90, -90, 0, 0.994 + 0.265 - 0.10, 0, 0.055 + 0.172/2],
                  [9, 90, 90, 0, -0.376, 1.002 - 0.20, 0.055 + 0.172/2],
                  [2, 90, 180, 0, 0.172 + 0.022, -0.35, 0.055 + 0.172/2],
                  [10, 90, 180, 0, 0.0, -0.35, 0.055 + 0.172/2],
-                 [11, 90, 180, 0, -(0.172 + 0.022), -0.35, 0.055 + 0.172/2],
-                 [12, 90, -90, 0, 0.3 + 0.795, 0.172 + 0.022, 0.055 + 0.172/2], # 12~14 are for demo uses ONLY.
-                 [13, 90, -90, 0, 0.3 + 0.795, 0, 0.055 + 0.172/2],
-                 [14, 90, -90, 0, 0.3 + 0.795, -(0.172 + 0.022), 0.055 + 0.172/2]])
+                 [11, 90, 180, 0, -(0.172 + 0.022), -0.35, 0.055 + 0.172/2]
+                 ])
 
 # adjust the biases of tags.
 poseTags[0:3, 4] += boardBiasesX[0]
@@ -489,6 +573,32 @@ def drawBrick(pose, vertices, ax):
     xxGrid = np.full_like(yyGrid, np.min(x))
     ax.plot_surface(xxGrid, yyGrid, zzGrid, color = 'navy', alpha = 1, rasterized = True)
 
+def drawBrickOG(pose, vertices):
+    verticesNew = hmRPYG(*pose[:3], pose[3:]).dot(vertices)[:3, :].T # 8x3 matrix
+    glLineWidth(5.0)
+    glBegin(GL_QUADS)
+    # draw the top and bottom surfaces
+    for i in [0, 1, 2, 3]:
+        glColor3fv((0.2, 0.5, 0.35))
+        glVertex3dv(verticesNew[i])
+    for i in [4, 5, 6, 7]:
+        glColor3fv((0.2, 0.5, 0.35))
+        glVertex3dv(verticesNew[i])
+    # draw the sides
+    for i in [0, 1, 5, 4]:
+        glColor3fv((0.1, 0.25, 0.1))
+        glVertex3dv(verticesNew[i])
+    for i in [1, 2, 6, 5]:
+        glColor3fv((0.1, 0.25, 0.1))
+        glVertex3dv(verticesNew[i])
+    for i in [2, 3, 7, 6]:
+        glColor3fv((0.1, 0.25, 0.1))
+        glVertex3dv(verticesNew[i])
+    for i in [3, 0, 4, 7]:
+        glColor3fv((0.1, 0.25, 0.1))
+        glVertex3dv(verticesNew[i])
+    glEnd()
+
 class brickMap():
     def __init__(self, hm, ax) -> None:
         '''
@@ -514,8 +624,12 @@ class brickMap():
         if self._viabilityDetect(pose) == True:  # if the pose of brick is viable.
             self.map = np.append(self.map, pose).reshape(-1, 6)
             # drawGround(hmRPYG(*pose[:3], pose[3:]), self.ax, "Brick ".join(str(len(self.map + 1))))  # len(list) returns the rows of a list (first dim).
+            '''
             drawRigidBody(hmRPYG(*pose[:3], pose[3:]).dot(self.brickVertices), self.ax)
             drawBrick(pose, self.brickVertices, self.ax)
+            '''
+            drawRigidBodyOG(hmRPYG(*pose[:3], pose[3:]).dot(self.brickVertices))
+            drawBrickOG(pose, self.brickVertices)
             return True  #  to be passed to the robot class.
         else:
             print("Invalid Brick Pose")
@@ -525,38 +639,6 @@ class brickMap():
         # TODO: the rule check function before placing bricks.
         return True
     
-def readIMU():
-    
-    # decode each line in the buffer.
-    try:
-        value_str = ser.readline().decode().strip()
-    except Exception as e:
-        print(f"Error reading from serial port: {e}")
-        return None, None, None
- 
-    robot_time = re.search(r'Time: (\d+)', value_str)  # int
-    yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
-    dx = re.search(r'dx: (-?(\d+\.\d+|inf))', value_str)  # float
-
-    if robot_time:
-        # get the time in second
-        stamp = int(robot_time.group(1))
-    else:
-        stamp = None
-        
-    if yaw:
-        yaw_out = yaw.group(1)
-    else:
-        yaw_out = None
-        
-    if dx:
-        dx_out = dx.group(1)
-    else:
-        dx_out = None
-
-    print(stamp, yaw_out, dx_out)
-    return stamp, yaw_out, dx_out
-
 # WiFi data TX function (for RPi).
 class UDPSender():
     def __init__(self, pc_ip, pc_port) -> None:
@@ -588,3 +670,29 @@ class PCReceiver():
 
     def close(self):
         self.sock.close()
+
+def keyboardCtrl():
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            quit()
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_LEFT:
+                glTranslatef(0.05, 0, 0)
+            if event.key == pygame.K_RIGHT:
+                glTranslatef(-0.05, 0, 0)
+            if event.key == pygame.K_UP:
+                glTranslatef(0, -0.05, 0)
+            if event.key == pygame.K_DOWN:
+                glTranslatef(0, 0.05, 0)
+
+def drawFloor():
+    vertices = np.array([[-0.4, -0.4, -0.02],
+                         [1.5, -0.4, -0.02],
+                         [1.5, 1.5, -0.02],
+                         [-0.4, 1.5, -0.02]])
+    glBegin(GL_QUADS)
+    glColor3fv((0.85, 0.85, 0.85))
+    for vertex in vertices:
+        glVertex3fv(vertex)
+    glEnd()
