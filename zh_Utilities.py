@@ -229,11 +229,11 @@ def drawRigidBodyOG(vertices):
 
 class robot():
     def __init__(self, hm, ax, landmarks): # hm is the 4x4 homogeneous matrix, for different rotation orders.
-        self.body_length = 0.20  #  meter
-        self.body_width = 0.10  #  meter
-        self.body_thickness = 0.03  #  meter
+        self.body_length = 0.18725  #  meter, actual size including the camera.
+        self.body_width = 0.06533  #  meter, actual size.
+        self.body_thickness = 0.0376  #  meter, actual size without the RPi and lid.
         # the centroid of the robot, also the origin of the rigid body frame.
-        # Can be adjusted to comply with the actual turning center.
+        # Can be adjusted to comply with the actual turning center. If being adjusted, it should indicate the translation from the previous centroid to the new.
         self.center = np.array([0.0, 0.0, 0.0])
         # To store the vertices of the robot body as a rectangular prism.
         # the first column is the coordinates of the left-front corner of the rigid body,
@@ -246,7 +246,7 @@ class robot():
                                        [0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2],
                                         - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2]],  # z coordinate
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])   # padding for computation.
-        self.body_verticesGround = self.body_vertices  # in the ground frame.
+        self.body_verticesGround = self.body_vertices  # in the ground frame. Initialization.
         self.measurement = np.zeros(6).astype('float')  # init the measurement of each update step.
         self.control = np.zeros(2).astype('float')  # init the 2D control input: translation along the X+ axis, delta-yaw.
         self.odometry = np.zeros(2).astype('float') # init the 2D odometry based on IMU.
@@ -259,6 +259,65 @@ class robot():
         self.lastYaw = 0.0
         self.lastStamp = 0.0
         self.trajectoryNo = 0
+        # Linkage Model Params for Solving IK.
+        self.linkageA = 0.04 # meters. The linkage connected with the servos. Two identical ones for each leg.
+        self.linkageB = 0.04 # meters. The supporting linkage attached to the linkage A on the front servo of each leg.
+        self.linkageC = 0.0398153 # meters. The upper segment of the curved leg attached to the linkage A on the rear servo of each leg.
+        self.linkageD = 0.0317750 # meters. The lower segment of the curved leg.
+        self.linkageE = 0.0308076 # meters. The segment perpendicular to linkageD, attaching to the foot.
+        self.linkageS = 0.0122 # meters. The distance between to axes of servos.
+        self.linkageW = 0.01915 # meters. The offset of the leg plane from the origin of the linkage model frame.
+        # Pre-render some frequently used variables. (Refer to the WAVEGO Arduino Sourcecode)
+        self.LAxLA = self.linkageA ** 2
+        self.LBxLB = self.linkageB ** 2
+        self.LWxLW = self.linkageW ** 2
+        self.LExLE = self.linkageE ** 2
+        self.LAxLA_LBxLB = self.LAxLA - self.LBxLB
+        self.LBxLB_LAxLA = self.LBxLB - self.LAxLA
+        self.L_CD = (self.linkageC + self.linkageD) ** 2
+        self.LAx2 = 2 * self.linkageA
+        self.LBx2 = 2 * self.linkageB
+        self.E_PI = 180 / np.pi  # for rad to deg conversion.
+        self.LSs2 = self.linkageS / 2
+        self.aLCDE = np.arctan2((self.linkageC + self.linkageD), self.linkageE)
+        self.sLEDC = np.sqrt(self.linkageE ** 2 + (self.linkageD + self.linkageC) ** 2)
+        # The offsets for the 4 origins of the leg linkage models' frames, from the body centroid. For 3D coodinate propagation.
+        self.linkageFrameOffsets = np.array([[(0.041 + 0.0096) - self.center[0], 0.5 * self.body_width - self.center[1] - 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145],  # offsets for the 4 servos, servo 1 (left-front).
+                                       [- (0.041 + 0.0096) - self.center[0], 0.5 * self.body_width - self.center[1] - 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145], # servo 2 (left-rear).
+                                       [(0.041 + 0.0096) - self.center[0], - 0.5 * self.body_width - self.center[1] + 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145], # servo 3 (right-front).
+                                       [- (0.041 + 0.0096) - self.center[0], - 0.5 * self.body_width - self.center[1] + 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145]]) # servo 4 (right-rear).
+        # The angles in degrees for each linkage.
+        self.linkageAngles = np.array([[0, 0, 0 ,0],  # LF leg: [angle servoFront-A, angle A-B, angle servoRear-A, angle A-C]
+                                       [0, 0, 0, 0],  # LR leg
+                                       [0, 0, 0, 0],  # RF leg
+                                       [0, 0, 0, 0]])  # RR leg
+        # The pose of each linkage joint in the body frame. This helps to render the legs in the ground frame.
+        # Format: [row, pitch, yaw, dx, dy, dz]
+        # TODO: give them proper initial values.
+        # TODO: maybe add a function to update the following values with self.linkageAngles and those linkage lengths.
+        self.linkageCoordinatesBody = np.array([[[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # LF leg: [Joint servoFront-linkageA], [Joint linkageA-B], [Joint servoRear-linkageA], [Joint linkageA-C]
+                                                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # LR leg
+                                                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # RF leg
+                                                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]]])  # RR leg
+        
+        print("Robot class initialized!")
+        
+    def inverseKinematics(self, targetX, targetY, targetZ):
+        '''
+        The function for Inverse Kinematics for each leg. Four legs should be using this same function.
+        Inputs: target foot positions in the linkage model's coordinate frame;
+        Outputs: None. It refreshes the linkageAngles internally when this function finishes.
+
+        Step1: compute the angle offset for the Y-axis servo.
+        Step2: compute the linkage angles for the 2 rear linkages (servoRear-A-C).
+        Step3: compute the linkage angles for the 2 front linkages (servoFront-A-B).
+        '''
+
+        # ---- Step1 ---- #
+        # from "void wigglePlaneIK()"
+        
+
+
     '''
     def forward(speed=50):
         dataCMD = json.dumps({'var':"move", 'val':1})

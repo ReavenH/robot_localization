@@ -9,6 +9,12 @@ from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import *
 
+# TODO: expand the robot class, to be compatible with the leg linkages and accurate body sizes.
+# step 1: draw simplified linkages using simple lines. Build the linkage model and indicate the coordinates of each joint (use DrawGroundOG) with respect of ground.
+# step 2: bind the OBJ model to each leg to visualize exact shape (use homogeneous transformation hmRPYG)
+# step 3: design and verify the brick placing system using simulation, along with the brick placing visualization.
+# step 4: modulize the script into function blocks.
+
 myTags = landmarks(hmRPYP, poseTags, None)  # tags use RPYP pose. Not specifying the axes.
 myBrickMap = brickMap(hmRPYG, None)
 
@@ -41,9 +47,13 @@ if __name__ == "__main__":
         pygame.init()  # init the pygame lib.
 
         window = (1200, 900)  # in pixels.
-
+        
         pygame.display.set_mode(window, DOUBLEBUF|OPENGL)
         pygame.display.set_caption('DEMO Scene Simulation')
+
+        # enable depth test. This avoids the incorrect transparency between objects.
+        # this should be AFTER the pygame / glfw window is initialized.
+        glEnable(GL_DEPTH_TEST)
 
         glClearColor(0.5, 0.5, 0.5, 1.0)
 
