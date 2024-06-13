@@ -169,7 +169,21 @@ def drawGround(pose, ax, label):
     plt.pause(0.02)  # default 0.02
     '''
 
-def drawGroundOG(pose):
+def drawLineOG(start, end):
+    '''
+    Draw a line segment using OpenGL.
+    Inputs: 
+        start: the start point x, y, z;
+        end: the end point x, y, z.
+    Output: None.
+    '''
+    glBegin(GL_LINES)
+    glColor3f(0.1, 0.1, 0.1)  # color of the line.
+    glVertex3f(*start)
+    glVertex3f(*end)
+    glEnd()
+
+def drawGroundOG(pose, scale = 1.0):
     '''
     draw the 3D pose with respect to the ground coordinates
     input: pose is the 4x4 array
@@ -182,7 +196,7 @@ def drawGroundOG(pose):
         return
 
     newOrigin = pose[:-1, -1]  # the translation vector of pose, 3x1
-    groundUnivVecs = np.vstack((groundCoords * 0.05, np.ones((1, 3))))  # 4x3, padding
+    groundUnivVecs = np.vstack((groundCoords * 0.05 * scale, np.ones((1, 3))))  # 4x3, padding
     newUnitVecs = np.dot(pose, groundUnivVecs)[:-1, :]  # 4x3 -> 3x3
     newCoordX = np.vstack((newOrigin, newUnitVecs[:, 0]))  # 2x3
     newCoordY = np.vstack((newOrigin, newUnitVecs[:, 1]))
@@ -235,6 +249,7 @@ class robot():
         # the centroid of the robot, also the origin of the rigid body frame.
         # Can be adjusted to comply with the actual turning center. If being adjusted, it should indicate the translation from the previous centroid to the new.
         self.center = np.array([0.0, 0.0, 0.0])
+        self.bodyPose = np.zeros(6).astype('float')  # pose of body center in the ground frame. Uses RPYG order.
         # To store the vertices of the robot body as a rectangular prism.
         # the first column is the coordinates of the left-front corner of the rigid body,
         # starting from left-front, clockwise; from upper to bottom surface.
@@ -246,14 +261,15 @@ class robot():
                                        [0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2],
                                         - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2]],  # z coordinate
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])   # padding for computation.
-        self.body_verticesGround = self.body_vertices  # in the ground frame. Initialization.
-        self.measurement = np.zeros(6).astype('float')  # init the measurement of each update step.
+        self.body_verticesGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(self.body_vertices)  # in the ground frame. Initialization.
+        self.measurement = np.zeros(6).astype('float')  # init the measurement of each update step. Uses RPYG order.
         self.control = np.zeros(2).astype('float')  # init the 2D control input: translation along the X+ axis, delta-yaw.
         self.odometry = np.zeros(2).astype('float') # init the 2D odometry based on IMU.
         self.hm = hm  # pass the homogeneous matrix calculation func.
         self.initialEstimate = np.zeros(6).astype('float')  # init the initail estimate of pose: roll, pitch, yaw, x, y, z.
         self.updatedEstimate = np.zeros(6).astype('float')
-        self.ax = ax  # the plot axis.
+        if ax is not None: 
+            self.ax = ax  # the plot axis for matplotlib.
         self.cam2body = np.array([-90, 0, 90, 0, 0, 0.15])  # in the camera frame, RPYP. Default: np.array([-90, 0, 90, 0, 0, 0.10])
         self.landmarks = landmarks  # nx7 array.
         self.lastYaw = 0.0
@@ -281,31 +297,54 @@ class robot():
         self.LSs2 = self.linkageS / 2
         self.aLCDE = np.arctan2((self.linkageC + self.linkageD), self.linkageE)
         self.sLEDC = np.sqrt(self.linkageE ** 2 + (self.linkageD + self.linkageC) ** 2)
+        self.angleEpsilon = (np.pi / 2 - self.aLCDE) * self.E_PI  # in degs, the fixed angle opposing to linkageE.
         # The offsets for the 4 origins of the leg linkage models' frames, from the body centroid. For 3D coodinate propagation.
-        self.linkageFrameOffsets = np.array([[(0.041 + 0.0096) - self.center[0], 0.5 * self.body_width - self.center[1] - 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145],  # offsets for the 4 servos, servo 1 (left-front).
-                                       [- (0.041 + 0.0096) - self.center[0], 0.5 * self.body_width - self.center[1] - 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145], # servo 2 (left-rear).
-                                       [(0.041 + 0.0096) - self.center[0], - 0.5 * self.body_width - self.center[1] + 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145], # servo 3 (right-front).
-                                       [- (0.041 + 0.0096) - self.center[0], - 0.5 * self.body_width - self.center[1] + 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145]]) # servo 4 (right-rear).
+        self.linkageFrameOffsets = np.array([[(0.041 + 0.0096) - self.center[0], 0.5 * self.body_width - self.center[1] - 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145],  # offsets for the 4 leg origins, leg 1 (left-front).
+                                       [- (0.041 + 0.0096) - self.center[0], 0.5 * self.body_width - self.center[1] - 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145], # leg 2 (left-rear).
+                                       [(0.041 + 0.0096) - self.center[0], - 0.5 * self.body_width - self.center[1] + 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145], # leg 3 (right-front).
+                                       [- (0.041 + 0.0096) - self.center[0], - 0.5 * self.body_width - self.center[1] + 0.006, 0.5 * self.body_thickness - self.center[2] - 0.01145]]) # leg 4 (right-rear).
         # The angles in degrees for each linkage.
-        self.linkageAngles = np.array([[0, 0, 0 ,0],  # LF leg: [angle servoFront-A, angle A-B, angle servoRear-A, angle A-C]
-                                       [0, 0, 0, 0],  # LR leg
-                                       [0, 0, 0, 0],  # RF leg
-                                       [0, 0, 0, 0]])  # RR leg
-        # The pose of each linkage joint in the body frame. This helps to render the legs in the ground frame.
+        # TODO: give them proper initial values.
+        self.linkageAngles = np.array([[0, 0, 0, 0 ,0],  # LF leg: [angle-YZPlaneRotation, angle servoFront-A, angle A-B, angle servoRear-A, angle A-C]
+                                       [0, 0, 0, 0, 0],  # LR leg
+                                       [0, 0, 0, 0, 0],  # RF leg
+                                       [0, 0, 0, 0, 0]]).astype('float')  # RR leg
+        # Storage of wiggle length (the Euclidian distance from the linkage frame origin to the foot)
+        self.wiggleLength = np.array([0, 0, 0, 0]).astype('float')  # one entry for each leg, from leg 1 to leg 4.
+        # Storage of servo driving angles.
+        self.anglesOutput = np.array([[0, 0, 0],  # leg1: wiggle servo, front servo, rear servo.
+                                      [0, 0, 0],
+                                      [0, 0, 0],
+                                      [0, 0, 0]]).astype('float')
+        # The pose of each linkage joint in the ground frame. 
         # Format: [row, pitch, yaw, dx, dy, dz]
         # TODO: give them proper initial values.
         # TODO: maybe add a function to update the following values with self.linkageAngles and those linkage lengths.
-        self.linkageCoordinatesBody = np.array([[[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # LF leg: [Joint servoFront-linkageA], [Joint linkageA-B], [Joint servoRear-linkageA], [Joint linkageA-C]
+        self.linkageCoordinatesGround = np.array([[[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # LF leg: [Joint servoFront-linkageA], [Joint linkageA-B], [Joint servoRear-linkageA], [Joint linkageA-C]
                                                 [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # LR leg
                                                 [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # RF leg
-                                                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]]])  # RR leg
-        
+                                                [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]]]).astype('float')  # RR leg
+        # initial feet positions
+        self.initFeetPos = np.array([[0.0, 0.085, 0.025],
+                                     [0.0, 0.085, 0.025],
+                                     [0.0, 0.085, 0.025],
+                                     [0.0, 0.085, 0.025]])
+        self.feetPosControl(self.initFeetPos)
+
         print("Robot class initialized!")
         
-    def inverseKinematics(self, targetX, targetY, targetZ):
+    def feetPosControl(self, positionMatrix):
+        '''
+        Controls 4 legs using '_inverseKinematics'.
+        Input: positionMatrix should be a 4x3 matrix.
+        '''
+        for i in [1, 2, 3, 4]:
+            self._inverseKinematics(i, *positionMatrix[i - 1])
+
+    def _inverseKinematics(self, legNo, targetX, targetY, targetZ):
         '''
         The function for Inverse Kinematics for each leg. Four legs should be using this same function.
-        Inputs: target foot positions in the linkage model's coordinate frame;
+        Inputs: 1) serial number of the leg (No.1 to No.4); 2-4) target foot positions in the linkage model's coordinate frame;
         Outputs: None. It refreshes the linkageAngles internally when this function finishes.
 
         Step1: compute the angle offset for the Y-axis servo.
@@ -314,9 +353,174 @@ class robot():
         '''
 
         # ---- Step1 ---- #
-        # from "void wigglePlaneIK()"
-        
+        # from "void wigglePlaneIK()", computing in the Y-Z plane of the linkage frame.
+        # this paragraph outputs:
+        #  1) angleAlpha, which is the rotation angle of the whole leg around the X-axis of the linkage model frame;
+        #  2) LB, i.e. the wiggle length, which is the foot's Y coordinate in the servo's coordinate frame, it differs from the targetY.
+        if targetY > 0:
+            L2C = targetZ ** 2 + targetY ** 2
+            LC = np.sqrt(L2C)
+            angleLambda = np.arctan2(targetZ, targetY) * self.E_PI  # convert from rad to deg.
+            anglePsi = np.arccos(self.linkageW / LC) * self.E_PI  
+            LB = np.sqrt(L2C - self.LWxLW)
+            angleAlpha = anglePsi + angleLambda - 90
+        elif targetY == 0:
+            angleAlpha = np.arccos(self.linkageW / targetZ) * self.E_PI  # ??? Why not arccos
+            L2C = targetZ ** 2 + targetY ** 2
+            LC = np.sqrt(L2C)  # modified from source code.
+            LB = np.sqrt(LC - self.LWxLW)  # modified from source code.
+        elif targetY < 0:
+            targetY = - targetY
+            L2C = targetZ ** 2 + targetY ** 2
+            LC = np.sqrt(L2C)
+            angleLambda = np.arctan2(targetZ, targetY) * self.E_PI
+            anglePsi = np.arccos(self.linkageW / LC) * self.E_PI
+            LB = np.sqrt(L2C - self.LWxLW)
+            angleAlpha = 90 - angleLambda + anglePsi
+        self.linkageAngles[legNo - 1][0] = angleAlpha
+        self.wiggleLength[legNo - 1] = LB
+        self.anglesOutput[legNo - 1][0] = angleAlpha
 
+        # ---- Step2 ---- #
+        # from "void singleLegPlaneIK()", computing in the X-Y plane of the leg frame.
+        # this paragraph outputs:
+        # 1) the rotation angle of the rear servo;
+        # 2) the x and y position of the intersecting joint of linkageC and linkageB in the plane of the leg (frame origin is the midpoint between two servos).
+        bufferS = np.sqrt((targetX + self.LSs2) ** 2 + LB ** 2)  # Euclidian distance from foot to the rear servo.
+        angleLambda = np.arccos((bufferS ** 2 + self.LAxLA - (self.L_CD + self.LExLE)) / (2 * bufferS * self.linkageA))  # the angle between bufferS and linkageA on the rear servo.
+        angleDelta = np.arctan2((targetX + self.LSs2), LB)  # angle btw bufferS and wiggle length.
+        angleBeta = angleLambda - angleDelta  # the rotation angle of the rear linkageA around the Z axis of the rear servo joint. (i.e. angle y-y')
+        angleTheta = self.aLCDE  # a fixed angle opposing to the linkageC-linkageD line.
+        angleOmega = np.arcsin((LB - np.cos(angleBeta) * self.linkageA) / self.sLEDC)  # an auxiliary angle.
+        print("angleOmega: {}".format(angleOmega))
+        angleNu = np.pi - angleTheta - angleOmega  # an auxiliary angle between linkageE and the horizontal plane of foot.
+        dEX = np.cos(angleNu) * self.linkageE  # projection length of linkageE to the X-axis.
+        dEY = np.sin(angleNu) * self.linkageE  # projection length of linkageE to the Y-axis.
+        print("dEX, dEY: {} {}".format(dEX, dEY))
+        angleMu = np.pi / 2 - angleNu  # angle btw linkageD and the horizontal plane of foot.
+        dDX = np.cos(angleMu) * self.linkageD  # projection length of linkageD to the X-axis.
+        dDY = np.sin(angleMu) * self.linkageD  # projection length of linkageD to the Y-axis.
+        posBCX = targetX + dDX - dEX  # the X-coordinate of the intersection joint of linkageB and linkageC, in the plane of leg.
+        posBCY = LB - dEY - dDY  # the Y-coordinate of the intersection joint of linkageB and linkageC, in the plane of leg.
+        print("posBCX, posBCY: {} {}".format(posBCX, posBCY))
+        self.linkageAngles[legNo - 1][3] = angleBeta * self.E_PI  # update the leg's rear servo rotation angle.
+        self.linkageAngles[legNo - 1][4] = -(np.pi - (np.pi / 2 - angleBeta) - angleOmega) * self.E_PI - self.angleEpsilon
+        self.anglesOutput[legNo - 1][2] = angleBeta * self.E_PI
+
+        # ---- Step3 ---- #
+        # from "void simpleLinkageIK()", computing in the X-Y plane of the leg frame.
+        # This paragraph outputs:
+        # 1) angleAlpha: drives the servo;
+        # 2) angleDelta: the rotation angle of front linkageA for the linkage model (not used for output);
+        # 3) angleBeta: for the linkage model of linkageB.
+        if posBCX - self.LSs2 == 0:  # if the joint is right below the origin.
+            anglePsi = np.arccos((self.LAxLA_LBxLB + posBCY ** 2) / (self.LAx2 * posBCY)) * self.E_PI
+            angleAlpha = 90 - anglePsi  # the offset of linkageA-front from the Y-axis.
+            angleOmega = np.arccos((posBCY ** 2 + self.LBxLB_LAxLA) / (self.LBx2 * posBCY)) * self.E_PI  # the auxiliary angle opposing to front linkageA.
+            angleBeta = anglePsi + angleOmega  # auxiliary angle between front linkageA and the extension of linkageB.
+        else:
+            L2C = posBCY ** 2 + (posBCX - self.LSs2) ** 2
+            LC = np.sqrt(L2C)  # the Euclidian distance from the joint to the front servo.
+            angleLambda = np.arctan2((posBCX - self.LSs2), posBCY) * self.E_PI  # WILL BE NEGATIVE when the joint is behind the front servo.
+            anglePsi = np.arccos((self.LAxLA_LBxLB + L2C) / (2 * self.linkageA * LC)) * self.E_PI  # will always be positive.
+            angleAlpha = 90 - angleLambda - anglePsi  # the offset of linkageA-front from the Y-axis.
+            angleOmega = np.arccos((self.LBxLB_LAxLA + + L2C) / (2 * LC * self.linkageB)) * self.E_PI
+            angleBeta = anglePsi + angleOmega
+        angleDelta = 90 - angleAlpha - angleBeta  # the rotation angle of the front linkageA around the Z-axis of the front servo.
+        self.linkageAngles[legNo - 1][1] = angleDelta
+        self.linkageAngles[legNo - 1][2] = angleBeta  # rotation of linkageB around jointA-B axis-Z.
+        self.anglesOutput[legNo - 1][1] = angleAlpha
+
+    def propagateAllLegJointPoses(self):
+        '''
+        This function calls the '_propagateSingleLegJointPoses' method to propagate all four leg's poses.
+        '''
+        for i in [1, 2, 3, 4]:
+            self._propagateSingleLegJointPoses(i)
+
+    def _propagateSingleLegJointPoses(self, legNo):
+        '''
+        This function calculates all the joint poses of a single leg in the ground coordinate frame.
+        Propagation: Joint -> Previous Joint -> Servo Attached -> Origin of Linkage Frame -> Rigid Body -> Ground.
+        Only to be called internally.
+        NOTE: the linkage frame will be using right hand system for all four legs.
+        '''
+        
+        if legNo == 1 or legNo == 2:  # for the left legs.
+            # ---- the linkage frame origin -> ground ---- #
+            linkageOriginPoseGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(hmRPYP(-90 + self.linkageAngles[legNo - 1][0], 0, 0, self.linkageFrameOffsets[legNo - 1]))
+            # ---- zero position of the front / back servo -> ground ---- #
+            frontServoZeroPoseGround = linkageOriginPoseGround.dot(hmRPYP(0, 0, 0, np.array([self.LSs2, 0, self.linkageW]).copy()))
+            backServoZeroPoseGround = linkageOriginPoseGround.dot(hmRPYP(0, 0, 0, np.array([- self.LSs2, 0, self.linkageW]).copy()))
+        elif legNo == 3 or legNo == 4:
+            # ---- the linkage frame origin -> ground ---- #
+            linkageOriginPoseGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(hmRPYP(-90 - self.linkageAngles[legNo - 1][0], 0, 0, self.linkageFrameOffsets[legNo - 1]))
+            # ---- zero position of the front / back servo -> ground ---- #
+            frontServoZeroPoseGround = linkageOriginPoseGround.dot(hmRPYP(0, 0, 0, np.array([self.LSs2, 0, - self.linkageW]).copy()))
+            backServoZeroPoseGround = linkageOriginPoseGround.dot(hmRPYP(0, 0, 0, np.array([- self.LSs2, 0, - self.linkageW]).copy()))
+        
+        # ---- the front linkageA ---- #
+        frontAPoseGround = frontServoZeroPoseGround.dot(hmRPYP(0, 0, self.linkageAngles[legNo - 1][1], np.array([0, 0, 0]).copy()))
+        self.linkageCoordinatesGround[legNo - 1][0][:3] = R.from_matrix(frontAPoseGround[:3, :3]).as_euler('zyx', degrees = True)[::-1]
+        self.linkageCoordinatesGround[legNo - 1][0][3:] = frontAPoseGround[:3, -1].flatten()
+        # ---- the back linkageA ---- # 
+        backAPoseGround = backServoZeroPoseGround.dot(hmRPYP(0, 0, self.linkageAngles[legNo - 1][3], np.array([0, 0, 0]).copy()))
+        self.linkageCoordinatesGround[legNo - 1][2][:3] = R.from_matrix(backAPoseGround[:3, :3]).as_euler('zyx', degrees = True)[::-1]
+        self.linkageCoordinatesGround[legNo - 1][2][3:] = backAPoseGround[:3, -1].flatten()
+        # ---- the linkageB ---- #
+        BPoseGround = frontAPoseGround.dot(hmRPYP(0, 0, self.linkageAngles[legNo - 1][2], np.array([0, self.linkageB, 0]).copy()))
+        self.linkageCoordinatesGround[legNo - 1][1][:3] = R.from_matrix(BPoseGround[:3, :3]).as_euler('zyx', degrees = True)[::-1]
+        self.linkageCoordinatesGround[legNo - 1][1][3:] = BPoseGround[:3, -1].flatten()
+        # ---- the linkageC ---- #
+        CPoseGround = backAPoseGround.dot(hmRPYP(0, 0, self.linkageAngles[legNo - 1][4], np.array([0, self.linkageC, 0]).copy()))
+        print("CPoseGround: {}".format(CPoseGround))
+        self.linkageCoordinatesGround[legNo - 1][3][:3] = R.from_matrix(CPoseGround[:3, :3]).as_euler('zyx', degrees = True)[::-1]
+        self.linkageCoordinatesGround[legNo - 1][3][3:] = CPoseGround[:3, -1].flatten()
+
+
+    def drawAllLegLinkagesOG(self):
+        '''
+        This function calls the '_drawSingleLegLinkagesOG' method to draw four legs' linkages using OpenGL.
+        '''
+        for i in [1, 2, 3, 4]:
+            self._drawSingleLegLinkagesOG(i, drawCoordinates = True)
+
+    def _drawSingleLegLinkagesOG(self, legNo, drawCoordinates = True):
+        """
+        This function draws the linkages of a single leg using OpenGL.
+        Only to be called internally.
+        """
+        # ---- front linkageA ---- #
+        if drawCoordinates == True:
+            hm = hmRPYP(*self.linkageCoordinatesGround[legNo - 1][0][:3], self.linkageCoordinatesGround[legNo - 1][0][3:])
+            drawGroundOG(hm, scale=0.3)
+        drawLineOG(self.linkageCoordinatesGround[legNo - 1][0][3:], self.linkageCoordinatesGround[legNo - 1][1][3:])
+
+        # ---- linkageB ---- #
+        hm = hmRPYP(*self.linkageCoordinatesGround[legNo - 1][1][:3], self.linkageCoordinatesGround[legNo - 1][1][3:])
+        if drawCoordinates == True:
+            drawGroundOG(hm, scale=0.3)
+        posJointBC = hm.dot(np.array([0, self.linkageB, 0, 1]).T)[:3]
+        drawLineOG(self.linkageCoordinatesGround[legNo - 1][1][3:], posJointBC)
+
+        # ---- rear linkageA ---- #
+        if drawCoordinates == True:
+            hm = hmRPYP(*self.linkageCoordinatesGround[legNo - 1][2][:3], self.linkageCoordinatesGround[legNo - 1][2][3:])
+            drawGroundOG(hm, scale=0.3)
+        drawLineOG(self.linkageCoordinatesGround[legNo - 1][2][3:], self.linkageCoordinatesGround[legNo - 1][3][3:])
+
+        # ---- linkageC, linkageD, LinkageE ---- #
+        hm = hmRPYP(*self.linkageCoordinatesGround[legNo - 1][3][:3], self.linkageCoordinatesGround[legNo - 1][3][3:])
+        if drawCoordinates == True:
+            drawGroundOG(hm, scale=0.3)
+        posJointDE = hm.dot(np.array([0, self.linkageC + self.linkageD, 0, 1]).T)[:3]
+        posFoot = hm.dot(np.array([-self.linkageE, self.linkageC + self.linkageD, 0, 1]).T)[:3]
+        drawLineOG(self.linkageCoordinatesGround[legNo - 1][3][3:], posJointDE)
+        drawLineOG(posJointDE, posFoot)
+
+    def drawRobotBody(self):
+        self.body_verticesGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(self.body_vertices)
+        drawRigidBodyOG(self.body_verticesGround)
 
     '''
     def forward(speed=50):
@@ -370,7 +574,7 @@ class robot():
                 continue
             '''
             rotCamera = R.from_matrix(homo[:3, :3])
-            eulerCamera = rotCamera.as_euler('zyx', degrees = True)
+            eulerCamera = rotCamera.as_euler('zyx', degrees = True)  # it uses right hand coordinate system.
             transCamera = homo[:-1, -1].flatten()
             transCamera[0] *= -1
             # Add the optional calibration function.
@@ -730,20 +934,29 @@ class PCReceiver():
     def close(self):
         self.sock.close()
 
-def keyboardCtrl():
+def keyboardCtrl(angleStep = 1, zoom_sensitivity = 0.001):
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             quit()
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_LEFT:
-                glTranslatef(0.05, 0, 0)
+                glTranslatef(0.025, 0, 0)
             if event.key == pygame.K_RIGHT:
-                glTranslatef(-0.05, 0, 0)
+                glTranslatef(-0.025, 0, 0)
             if event.key == pygame.K_UP:
-                glTranslatef(0, -0.05, 0)
+                glTranslatef(0, -0.025, 0)
             if event.key == pygame.K_DOWN:
-                glTranslatef(0, 0.05, 0)
+                glTranslatef(0, 0.025, 0)
+        if event.type == MOUSEBUTTONDOWN:
+            if event.button == 1:
+                glRotatef(angleStep, 1, 0, 0)
+            elif event.button == 3:
+                glRotatef(angleStep, 0, 0, 1)
+            elif event.button == 4:  # wheel up.
+                glTranslatef(0.0, 0.0, zoom_sensitivity)
+            elif event.button == 5: 
+                glTranslatef(0.0, 0.0, -zoom_sensitivity)
 
 def drawFloor():
     vertices = np.array([[-0.4, -0.4, -0.02],
