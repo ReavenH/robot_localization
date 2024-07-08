@@ -2,6 +2,7 @@
 # X: pointing forwards; Y: pointing left; Z: pointing upwards
 # each column: x, y, z point coords,
 import numpy as np
+import sympy as sp
 import matplotlib.pyplot as plt
 import serial
 from scipy.spatial.transform import Rotation as R
@@ -15,61 +16,67 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 import pygame
 from pygame.locals import *
+import platform
 
-# temporarily skipped for omitting serial.
-'''
-# from WAVESHARE, establish serial connection.
-def connect_serial(port, baudrate):
-    while True:
+if platform.system() == "Linux":  # if on raspberry pi
+    # instantiate gpio control for the servos.
+    import subprocess
+    subprocess.run('sudo pigpiod', shell=True, check=True)
+    import pigpio
+    pi = pigpio.pi()
+
+    # from WAVESHARE, establish serial connection.
+    def connect_serial(port, baudrate):
+        while True:
+            try:
+                ser = serial.Serial(port, baudrate)
+                print("Serial connected")
+                return ser
+            except serial.SerialException as e:
+                print("Serial Disconnected:", e)
+                print("wait for 5 second for reconnecting...")
+                time.sleep(5)
+
+    ##kill the agetty serial
+    os.system("sudo systemctl stop serial-getty@ttyS0.service")
+    os.system("sudo chmod 777 /dev/ttyS0")
+
+    port = "/dev/ttyS0"
+    baudrate = 115200
+    ser = connect_serial(port, baudrate)
+
+    def readIMU():
+
+        # decode each line in the buffer.
         try:
-            ser = serial.Serial(port, baudrate)
-            print("Serial connected")
-            return ser
-        except serial.SerialException as e:
-            print("Serial Disconnected:", e)
-            print("wait for 5 second for reconnecting...")
-            time.sleep(5)
-
-##kill the agetty serial
-os.system("sudo systemctl stop serial-getty@ttyS0.service")
-os.system("sudo chmod 777 /dev/ttyS0")
-
-port = "/dev/ttyS0"
-baudrate = 115200
-ser = connect_serial(port, baudrate)
-
-def readIMU():
+            value_str = ser.readline().decode().strip()
+        except Exception as e:
+            print(f"Error reading from serial port: {e}")
+            return None, None, None
     
-    # decode each line in the buffer.
-    try:
-        value_str = ser.readline().decode().strip()
-    except Exception as e:
-        print(f"Error reading from serial port: {e}")
-        return None, None, None
- 
-    robot_time = re.search(r'Time: (\d+)', value_str)  # int
-    yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
-    dx = re.search(r'dx: (-?(\d+\.\d+|inf))', value_str)  # float
+        robot_time = re.search(r'Time: (\d+)', value_str)  # int
+        yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
+        dx = re.search(r'dx: (-?(\d+\.\d+|inf))', value_str)  # float
 
-    if robot_time:
-        # get the time in second
-        stamp = int(robot_time.group(1))
-    else:
-        stamp = None
-        
-    if yaw:
-        yaw_out = yaw.group(1)
-    else:
-        yaw_out = None
-        
-    if dx:
-        dx_out = dx.group(1)
-    else:
-        dx_out = None
+        if robot_time:
+            # get the time in second
+            stamp = int(robot_time.group(1))
+        else:
+            stamp = None
 
-    print(stamp, yaw_out, dx_out)
-    return stamp, yaw_out, dx_out
-'''
+        if yaw:
+            yaw_out = yaw.group(1)
+        else:
+            yaw_out = None
+
+        if dx:
+            dx_out = dx.group(1)
+        else:
+            dx_out = None
+
+        print(stamp, yaw_out, dx_out)
+        return stamp, yaw_out, dx_out
+
 groundCoords = np.array([[1.0, 0.0, 0.0],
                          [0.0, 1.0, 0.0],
                          [0.0, 0.0, 1.0]])
@@ -241,8 +248,109 @@ def drawRigidBodyOG(vertices):
             glVertex3dv(vertices[vertex])
     glEnd()
 
+# the experimental class for the flipping linkage for placing a brick.
+class flipLinkage():
+    def __init__(self, linkageS, linkageA, linkageB, linkageW) -> None:
+        '''
+        The linkage B (longer one) is connected to a servo, while the linkage A is not.
+        Refer to the Chebyshev Linkage Model. The inverse kinematics may not be solvable.
+        linkageW > linkageS, linkageA > linkageS and linkageA must not collide with the robot front.
+        '''
+        self.linkageA = linkageA  # meters.
+        self.linkageW = linkageW  # meters.
+        self.linkageS = linkageS  # meters.
+        self.linkageB = linkageB # meters.
+        self.E_PI = 180 / np.pi
+        # TODO use functions to auto calculate.
+        self.betaLim1 = 55 # degs.
+        self.betaLim2 = 20 
+        self._inverseKinematics(0)  # init the joint angles.
+    
+    def kinematics(self, angleBeta):
+        '''
+        Computes the joint angles of the linkages, given the driving servo angle.
+        Based on the vector constant rule.
+        '''
+        self.angleBeta = angleBeta
+
+        # when joint A is above linkageB.
+        if self.angleBeta >= self.betaLim1:
+            coeffs = np.array([[self.linkageA, self.linkageW, self.linkageS + self.linkageB * np.cos(self.angleBeta / 180 * np.pi)],
+                               [self.linkageA, self.linkageW, self.linkageB * np.sin(self.angleBeta / 180 * np.pi)]])
+
+            # init symbol variables.
+            alpha, theta = sp.symbols('alpha theta')
+
+            # list the two equations.
+            eqCos = sp.Eq(coeffs[0][0] * sp.cos(alpha) + coeffs[0][1] * sp.cos(theta), coeffs[0][2])
+            eqSin = sp.Eq(coeffs[1][0] * sp.sin(alpha) + coeffs[1][1] * sp.sin(theta), coeffs[1][2])
+
+            # solve alpha first.
+            cosTheta = (coeffs[0][-1] - coeffs[0][0] * sp.cos(alpha)) / coeffs[0][1]
+            sinTheta = (coeffs[1][-1] - coeffs[1][0] * sp.sin(alpha)) / coeffs[1][1]
+
+            # solve self.angleAlpha using triangulation.
+            eqTriangulation = sp.Eq(cosTheta ** 2 + sinTheta ** 2, 1)
+            self.angleAlpha = np.array(sp.solve(eqTriangulation, alpha))
+            self.angleAlpha = self.angleAlpha[(self.angleAlpha <= np.pi / 2) & (self.angleAlpha >= - np.pi / 2)][0]
+
+            # solve self.angleTheta by plugging in alpha.
+            cosThetaSol = cosTheta.subs(alpha, self.angleAlpha)
+            sinThetaSol = sinTheta.subs(alpha, self.angleAlpha)
+            self.angleTheta = sp.atan2(sinThetaSol, cosThetaSol).evalf() * self.E_PI
+            self.angleAlpha = self.angleAlpha * self.E_PI
+
+        elif self.angleBeta < self.betaLim1 and self.angleBeta >= self.betaLim2:
+            pass
+
+
+        print("Updated angleAlpha: {}".format(self.angleAlpha))
+        print("Updated angleTheta: {}".format(self.angleTheta))
+        print("Updated angleBeta: {}".format(self.angleBeta))
+        
+
+    def _calculateBetaLimits(self):
+        pass
+
+    def _inverseKinematics(self, targetAngle):
+        '''
+        The targetAngle is the tilt angle of the board in the body frame.
+        '''
+        if targetAngle == 180.0:
+            '''
+            When the board above is parallel to the body.
+            Solve using similar triangles.
+            '''
+            self.angleTheta = 180.0
+            OB = self.linkageB * (self.linkageW / (self.linkageW + self.linkageS))
+            OA = self.linkageA * (self.linkageW / (self.linkageW + self.linkageS))
+            self.angleAlpha = np.arccos((OA ** 2 + self.linkageW ** 2 - OB ** 2) / (2 * OA * self.linkageW)) * self.E_PI
+            self.angleBeta = 180 - np.arccos((OB ** 2 + self.linkageW ** 2 - OA ** 2) / (2 * OB * self.linkageW)) * self.E_PI
+        elif targetAngle > 0.0 and targetAngle < 90.0:
+            print("IK not available at theta={}!".format(targetAngle))
+            pass
+        elif targetAngle == 0.0:
+            self.angleTheta = 0.0
+            # similar triangles.
+            m = (self.linkageS * self.linkageB) / (self.linkageW - self.linkageS)
+            n = (self.linkageS * self.linkageA) / (self.linkageW - self.linkageS)
+            OB = self.linkageB + m
+            OA = self.linkageA + n
+            print(OB, OA)
+            print((self.linkageW ** 2 + OB ** 2 - OA ** 2) / (2 * self.linkageW * OB))
+            self.angleBeta = np.arccos((self.linkageW ** 2 + OB ** 2 - OA ** 2) / (2 * self.linkageW * OB)) * self.E_PI
+            print(self.angleBeta)
+            self.angleAlpha = (np.pi - np.arccos((n ** 2 + self.linkageS ** 2 - m ** 2) / (2 * self.linkageS * n))) * self.E_PI
+
+        print("IK angleAlpha: {}".format(self.angleAlpha))
+        print("IK angleTheta: {}".format(self.angleTheta))
+        print("IK angleBeta: {}".format(self.angleBeta))
+
+    def drawLinkages(self):
+        pass
+
 class robot():
-    def __init__(self, hm, ax, landmarks): # hm is the 4x4 homogeneous matrix, for different rotation orders.
+    def __init__(self, hm, ax, landmarks, servoConfig=None): # hm is the 4x4 homogeneous matrix, for different rotation orders.
         self.body_length = 0.18725  #  meter, actual size including the camera.
         self.body_width = 0.06533  #  meter, actual size.
         self.body_thickness = 0.0376  #  meter, actual size without the RPi and lid.
@@ -331,8 +439,170 @@ class robot():
                                      [0.0, 0.085, 0.025]])
         self.feetPosControl(self.initFeetPos)
 
+        # check the running platform.
+        # 0=Windows, 1=Raspberry Pi, 2=Linux, None=others.
+        self.onPlatform = self._checkPlatform()
+        print("Robot Class running on Platform {}\n".format(self.onPlatform))
+
+        # init servo config files.
+        self.servoNo = [17, 27, 22]  # BCM of servo PWM pins.
+        self.servoCriticalAngles = {}
+        self.servoDefaultAngles = []
+        self.servoAngles = []
+        if servoConfig != None and self.onPlatform == 1:
+            with open(servoConfig, 'r', encoding='utf-8') as json_file:
+                self.servoCriticalAngles = json.load(json_file)
+            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
+            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
+            # init pins.
+            self._servoIOInit(50)
+            print("Servos initialized!")
+
         print("Robot class initialized!")
         
+    def _checkPlatform(self):
+        system = platform.system()
+        if system == "Windows":
+            return 0
+        elif system == "Linux":
+            try:
+                with open('/proc/device-tree/model') as model_file:
+                    model = model_file.read().lower()
+                    if 'raspberry pi' in model:
+                        return 1
+            except FileNotFoundError:
+                pass
+        
+            return 2
+        else:
+            return None
+
+    def _servoIOInit(self, frequency):
+        for pin in self.servoNo:
+            pi.set_mode(pin, pigpio.OUTPUT)
+            pi.set_PWM_frequency(pin, frequency)
+
+    def singleServoCtrl(self, number_servo, angle, speed):
+        while angle != self.servoAngles[number_servo]:
+            self.servoAngles[number_servo] += min(max(angle-self.servoAngles[number_servo],-speed),speed)
+            pi.set_servo_pulsewidth(self.servoNo[number_servo], self.servoAngles[number_servo])
+            # time.sleep(0.01)
+
+    def resetPose(self):
+        self.singleServoCtrl(0, self.servoDefaultAngles[0], 1/2)
+        time.sleep(0.5)
+        self.singleServoCtrl(1, self.servoDefaultAngles[1], 1/2)
+        time.sleep(0.5)
+        self.singleServoCtrl(2, self.servoDefaultAngles[2], 1/2)
+        time.sleep(0.5)
+
+    def openGripper(self):
+        print("Open Gripper.")
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1/2)
+
+    def closeGripper(self):
+        print("Close Gripper.")
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperFasten"], 1/2)
+
+    def placeBrickPhase1(self):
+        # progress 1~4.
+        for i in [1, 2, 3, 4]:
+            self.placeBrick(i, verbose=True)
+
+    def placeBrickPhase2(self):
+        # progress 5: release brick.
+        self.placeBrick(5, verbose=True)
+
+    def placeBrickPhase3(self):
+        # progress 6~9.
+        for i in [6, 7, 8, 9]:
+            self.placeBrick(i, verbose=True)
+
+    # TODO add some critical frames of the whole motion sequence.
+    def pushBrick(self, offset, verbose=False):
+        # lean forward.
+        if verbose:
+            print("Leaning Forward.")
+        dataCMD = json.dumps({'var':"leaning", 'val':offset})
+        ser.write(dataCMD.encode())
+        time.sleep(1)
+        # reset pose.
+        if verbose:
+            print("Reset Pose.")
+        dataCMD = json.dumps({'var':"leaning", 'val':-offset})
+        ser.write(dataCMD.encode())
+        if verbose:
+            print('Push Brick.')	
+
+    def placeBrick(self, progress, verbose=False):
+        # primarily called internally by other functions.
+        if progress == 1:
+            # linkage down.
+            if verbose:
+                print("Linkage Tilt.")
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageTilt"], 1/10)
+            time.sleep(0.5)
+
+        if progress == 2:
+            # align brick.
+            if verbose:
+                print("Align Brick.")
+            self.singleServoCtrl(1, self.servoCriticalAngles["brickVertical"], 1/20)  # rotate brick board to vertical.
+            time.sleep(0.5)
+            self.singleServoCtrl(2, self.servoCriticalAngles["gripperAlign"], 1/2)  # gripper open
+            time.sleep(1)
+            self.singleServoCtrl(2, self.servoCriticalAngles["gripperFasten"], 1/2)  # gripper fasten
+            time.sleep(0.5)
+
+        if progress == 3:
+            # rotate brick.
+            if verbose:
+                print("Rotate Brick.")
+            self.singleServoCtrl(1, self.servoCriticalAngles["brickDown"], 1/50)  # changed
+            time.sleep(1)
+
+        if progress == 4:
+            # linkage down.
+            if verbose:
+                print("Linkage Down.")
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown"], 1/10)  # changed
+            time.sleep(1)
+
+        if progress == 5:
+            # TODO before releasing brick, push the brick to align.
+            # release brick.
+            if verbose:
+                print("Release Brick.")
+            self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1/10)
+            time.sleep(2)
+
+        if progress == 6:
+            # linkage slightly up.
+            if verbose:
+                print("Linkage Slightly Up.")
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageSlightlyUp"], 1/2)
+            time.sleep(1)
+
+        if progress == 7:
+            # rotate brickboard.
+            if verbose:
+                print("Rotate Brickboard.")
+            self.singleServoCtrl(1, self.servoCriticalAngles["brickUp"], 1/2)
+            time.sleep(0.5)
+
+        if progress == 8:
+            # fasten gripper.
+            if verbose:
+                print("Fasten Gripper.")
+            self.singleServoCtrl(2, self.servoCriticalAngles["gripperClose"], 1/2)
+            time.sleep(0.5)
+
+        if progress == 9:
+            # linkages up.
+            if verbose:
+                print("Linkage Up.")
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
+
     def feetPosControl(self, positionMatrix):
         '''
         Controls 4 legs using '_inverseKinematics'.
@@ -392,17 +662,17 @@ class robot():
         angleBeta = angleLambda - angleDelta  # the rotation angle of the rear linkageA around the Z axis of the rear servo joint. (i.e. angle y-y')
         angleTheta = self.aLCDE  # a fixed angle opposing to the linkageC-linkageD line.
         angleOmega = np.arcsin((LB - np.cos(angleBeta) * self.linkageA) / self.sLEDC)  # an auxiliary angle.
-        print("angleOmega: {}".format(angleOmega))
+        # print("angleOmega: {}".format(angleOmega))
         angleNu = np.pi - angleTheta - angleOmega  # an auxiliary angle between linkageE and the horizontal plane of foot.
         dEX = np.cos(angleNu) * self.linkageE  # projection length of linkageE to the X-axis.
         dEY = np.sin(angleNu) * self.linkageE  # projection length of linkageE to the Y-axis.
-        print("dEX, dEY: {} {}".format(dEX, dEY))
+        # print("dEX, dEY: {} {}".format(dEX, dEY))
         angleMu = np.pi / 2 - angleNu  # angle btw linkageD and the horizontal plane of foot.
         dDX = np.cos(angleMu) * self.linkageD  # projection length of linkageD to the X-axis.
         dDY = np.sin(angleMu) * self.linkageD  # projection length of linkageD to the Y-axis.
         posBCX = targetX + dDX - dEX  # the X-coordinate of the intersection joint of linkageB and linkageC, in the plane of leg.
         posBCY = LB - dEY - dDY  # the Y-coordinate of the intersection joint of linkageB and linkageC, in the plane of leg.
-        print("posBCX, posBCY: {} {}".format(posBCX, posBCY))
+        # print("posBCX, posBCY: {} {}".format(posBCX, posBCY))
         self.linkageAngles[legNo - 1][3] = angleBeta * self.E_PI  # update the leg's rear servo rotation angle.
         self.linkageAngles[legNo - 1][4] = -(np.pi - (np.pi / 2 - angleBeta) - angleOmega) * self.E_PI - self.angleEpsilon
         self.anglesOutput[legNo - 1][2] = angleBeta * self.E_PI
@@ -438,7 +708,7 @@ class robot():
         for i in [1, 2, 3, 4]:
             self._propagateSingleLegJointPoses(i)
 
-    def _propagateSingleLegJointPoses(self, legNo):
+    def _propagateSingleLegJointPoses(self, legNo, verbose=False):
         '''
         This function calculates all the joint poses of a single leg in the ground coordinate frame.
         Propagation: Joint -> Previous Joint -> Servo Attached -> Origin of Linkage Frame -> Rigid Body -> Ground.
@@ -473,7 +743,8 @@ class robot():
         self.linkageCoordinatesGround[legNo - 1][1][3:] = BPoseGround[:3, -1].flatten()
         # ---- the linkageC ---- #
         CPoseGround = backAPoseGround.dot(hmRPYP(0, 0, self.linkageAngles[legNo - 1][4], np.array([0, self.linkageC, 0]).copy()))
-        print("CPoseGround: {}".format(CPoseGround))
+        if verbose:
+            print("CPoseGround: {}".format(CPoseGround))
         self.linkageCoordinatesGround[legNo - 1][3][:3] = R.from_matrix(CPoseGround[:3, :3]).as_euler('zyx', degrees = True)[::-1]
         self.linkageCoordinatesGround[legNo - 1][3][3:] = CPoseGround[:3, -1].flatten()
 
@@ -522,7 +793,6 @@ class robot():
         self.body_verticesGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(self.body_vertices)
         drawRigidBodyOG(self.body_verticesGround)
 
-    '''
     def forward(speed=50):
         dataCMD = json.dumps({'var':"move", 'val':1})
         ser.write(dataCMD.encode())
@@ -537,7 +807,7 @@ class robot():
         dataCMD = json.dumps({'var':"move", 'val':3})
         ser.write(dataCMD.encode())
         print('robot-stop')	
-    '''
+
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
         self.initialEstimate = self.updatedEstimate
@@ -777,14 +1047,15 @@ trajectory = np.array([[0.0, 0.994 - 0.20, 0.994 - 0.20, 0.0, 0.0],  # x coordin
                        [0.0, 0.0, 0.0, 0.0, 0.0]])  # z coordinate
 
 # tag grouping, each row represents the tagIDs on the same board.
-'''
+
 tagGroups = np.array([[3, 4, 5],
                       [1, 7, 6],
                       [8, 9, 0],
                       [2, 10, 11]])
-'''  
 
+'''
 tagGroups = np.array([[15, 16, 17]])  # tag 15~17 are only for DEMO USE.
+'''
 
 # function of Yaw and X, Z calibration.
 def calibratePose2D(yaw, trans):

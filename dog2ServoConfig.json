@@ -1,0 +1,14 @@
+{
+        "linkageDown": 2100, 
+        "linkageTilt": 2200, 
+        "linkageUp": 1050, 
+        "linkageSlightlyUp": 1750, 
+        "brickDown": 1800, 
+        "brickUp": 600, 
+        "brickVertical": 800, 
+        "gripperFasten": 1500, 
+        "gripperLoose": 2500, 
+        "gripperAlign": 1730, 
+        "gripperClose": 500,
+        "gripperPush": 1750
+}

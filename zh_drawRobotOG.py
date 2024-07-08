@@ -12,7 +12,7 @@ TODO:
 1. Joint angle rearA-LinkageC is wrong. Done.
 2. Coordinate propagation is wrong. (not symmetric). Done.
 3. The translation of the linkageA-C joint is wrong (should not be all zeros). Done.
-4. Bind the OBJ file to the linkage model.
+4. Bind the OBJ file to the linkage model (later on).
 5. Calculate the body pose based on the standing pose from the ground (if it is needed for verification).
 6. Design the brick placing system, first finish the linkage model design.
 '''
