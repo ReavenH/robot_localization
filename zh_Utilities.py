@@ -25,12 +25,13 @@ if platform.system() == "Linux":  # if on raspberry pi
     import pigpio
     pi = pigpio.pi()
 
+    
     # from WAVESHARE, establish serial connection.
     def connect_serial(port, baudrate):
         while True:
             try:
                 ser = serial.Serial(port, baudrate)
-                print("Serial connected")
+                print("Serial is connected: {}".format(ser.is_open))
                 return ser
             except serial.SerialException as e:
                 print("Serial Disconnected:", e)
@@ -44,8 +45,9 @@ if platform.system() == "Linux":  # if on raspberry pi
     port = "/dev/ttyS0"
     baudrate = 115200
     ser = connect_serial(port, baudrate)
+    
 
-    def readIMU():
+    def readIMU(ser):
 
         # decode each line in the buffer.
         try:
@@ -350,7 +352,7 @@ class flipLinkage():
         pass
 
 class robot():
-    def __init__(self, hm, ax, landmarks, servoConfig=None): # hm is the 4x4 homogeneous matrix, for different rotation orders.
+    def __init__(self, hm, ax, landmarks, ser, servoConfig=None): # hm is the 4x4 homogeneous matrix, for different rotation orders.
         self.body_length = 0.18725  #  meter, actual size including the camera.
         self.body_width = 0.06533  #  meter, actual size.
         self.body_thickness = 0.0376  #  meter, actual size without the RPi and lid.
@@ -442,7 +444,7 @@ class robot():
         # check the running platform.
         # 0=Windows, 1=Raspberry Pi, 2=Linux, None=others.
         self.onPlatform = self._checkPlatform()
-        print("Robot Class running on Platform {}\n".format(self.onPlatform))
+        print("Robot Class running on Platform {}".format(self.onPlatform))
 
         # init servo config files.
         self.servoNo = [17, 27, 22]  # BCM of servo PWM pins.
@@ -458,7 +460,13 @@ class robot():
             self._servoIOInit(50)
             print("Servos initialized!")
 
-        print("Robot class initialized!")
+        # composite brickMap class.
+        self.brickMap = brickMap(hmRPYG, None)
+
+        # composite the serial class.
+        self.ser = ser
+
+        print("Robot Class initialized!")
         
     def _checkPlatform(self):
         system = platform.system()
@@ -472,7 +480,6 @@ class robot():
                         return 1
             except FileNotFoundError:
                 pass
-        
             return 2
         else:
             return None
@@ -495,6 +502,7 @@ class robot():
         time.sleep(0.5)
         self.singleServoCtrl(2, self.servoDefaultAngles[2], 1/2)
         time.sleep(0.5)
+        print("Reset Linkage Pose.")
 
     def openGripper(self):
         print("Open Gripper.")
@@ -514,8 +522,13 @@ class robot():
         self.placeBrick(5, verbose=True)
 
     def placeBrickPhase3(self):
-        # progress 6~9.
-        for i in [6, 7, 8, 9]:
+        # progress 6~7.
+        for i in [6, 7]:
+            self.placeBrick(i, verbose=True)
+
+    def placeBrickPhase4(self):
+        # progress 8~9.
+        for i in [8, 9]:
             self.placeBrick(i, verbose=True)
 
     # TODO add some critical frames of the whole motion sequence.
@@ -523,16 +536,17 @@ class robot():
         # lean forward.
         if verbose:
             print("Leaning Forward.")
-        dataCMD = json.dumps({'var':"leaning", 'val':offset})
-        ser.write(dataCMD.encode())
-        time.sleep(1)
+        dataCMD = json.dumps({'var':"swing", 'val':offset})  # offset in mm. positive offset -> leaning forward.
+        self.ser.write(dataCMD.encode())
+        time.sleep(8)  # wait until finish.
+
+    def leanBack(self, offset, verbose=False):
         # reset pose.
         if verbose:
-            print("Reset Pose.")
-        dataCMD = json.dumps({'var':"leaning", 'val':-offset})
-        ser.write(dataCMD.encode())
-        if verbose:
-            print('Push Brick.')	
+            print("Leaning Backwards.")
+        dataCMD = json.dumps({'var':"swing", 'val':-offset})
+        self.ser.write(dataCMD.encode())
+        time.sleep(5)  # wait until finish.
 
     def placeBrick(self, progress, verbose=False):
         # primarily called internally by other functions.
@@ -793,19 +807,19 @@ class robot():
         self.body_verticesGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(self.body_vertices)
         drawRigidBodyOG(self.body_verticesGround)
 
-    def forward(speed=50):
+    def forward(self, speed=50):
         dataCMD = json.dumps({'var':"move", 'val':1})
-        ser.write(dataCMD.encode())
+        self.ser.write(dataCMD.encode())
         print('robot-forward')
     
-    def stopLR():
+    def stopLR(self):
         dataCMD = json.dumps({'var':"move", 'val':6})
-        ser.write(dataCMD.encode())
+        self.ser.write(dataCMD.encode())
         print('robot-stop')
 
-    def stopFB():
+    def stopFB(self):
         dataCMD = json.dumps({'var':"move", 'val':3})
-        ser.write(dataCMD.encode())
+        self.ser.write(dataCMD.encode())
         print('robot-stop')	
 
     def poseUpdate(self):
@@ -1139,7 +1153,7 @@ class brickMap():
         Init the class to store brick model and update the brick map.
         '''
         self.hm = hm
-        self.ax = ax
+        # self.ax = ax
         self.brickLength = 0.40 # meter
         self.brickWidth = 0.20
         self.brickThickness = 0.015
@@ -1152,6 +1166,7 @@ class brickMap():
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
         # self.map = np.zeros(6).astype('float')  # to store the poses of the bricks as maps.
         self.map = np.array([])  # to utilize the append attribute of lists. len = No. of bricks.
+        print("brickMap Initialized!")
 
     def place(self, pose):  # pose is a list len = 6.
         # TODO: detect collision and layer.

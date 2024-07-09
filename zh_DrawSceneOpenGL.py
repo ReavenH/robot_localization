@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
         pygame.init()  # init the pygame lib.
 
-        window = (1200, 900)  # in pixels.
+        window = (800, 600)  # in pixels.
         
         pygame.display.set_mode(window, DOUBLEBUF|OPENGL)
         pygame.display.set_caption('DEMO Scene Simulation')
