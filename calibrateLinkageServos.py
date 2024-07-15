@@ -80,12 +80,16 @@ try:
     waitKey = True
 
     while(True):
-        desiredServo = int(input("Input servo No (0=baseBoard, 1=brickBoard, 2=gripperGear)\n"))
-        desiredPWM = int(input("Input desired PWM for Servo {}\n".format(desiredServo)))
-        if desiredServo == 0:
-            speed = 1/2
-        else:
-            speed = 1/10
+        numIn = input("Input a value: servo No. or PWM\n")
+        if numIn <=3 and numIn >=1:
+            desiredServo = numIn
+            desiredPWM = int(input("Input desired PWM for Servo {}\n".format(desiredServo)))
+            desiredServo = int(input("Input servo No (0=baseBoard, 1=brickBoard, 2=gripperGear)\n"))
+            
+            if desiredServo == 0:
+                speed = 1/2
+            else:
+                speed = 1/10
         singleServoCtrl(desiredServo, desiredPWM, speed)
     
 

@@ -6,6 +6,7 @@ import sympy as sp
 import matplotlib.pyplot as plt
 import serial
 from scipy.spatial.transform import Rotation as R
+from scipy.spatial.distance import cdist
 import time
 import os
 import json
@@ -17,6 +18,8 @@ from OpenGL.GLU import *
 import pygame
 from pygame.locals import *
 import platform
+import cv2
+from scipy.io import savemat, loadmat
 
 if platform.system() == "Linux":  # if on raspberry pi
     # instantiate gpio control for the servos.
@@ -352,7 +355,7 @@ class flipLinkage():
         pass
 
 class robot():
-    def __init__(self, hm, ax, landmarks, ser, servoConfig=None): # hm is the 4x4 homogeneous matrix, for different rotation orders.
+    def __init__(self, hm, ax, landmarks, ser, servoConfig=None, vidsrc = 1): # hm is the 4x4 homogeneous matrix, for different rotation orders.
         self.body_length = 0.18725  #  meter, actual size including the camera.
         self.body_width = 0.06533  #  meter, actual size.
         self.body_thickness = 0.0376  #  meter, actual size without the RPi and lid.
@@ -464,7 +467,16 @@ class robot():
         self.brickMap = brickMap(hmRPYG, None)
 
         # composite the serial class.
-        self.ser = ser
+        if ser != None:
+            self.ser = ser
+
+        # set the resolution/source of the bottom camera.
+        self.bottomCamRes = (160, 120)
+        self.bottomCamSrc = vidsrc  # /video1 
+
+        # store the previous bottom camera poses.
+        self.bottomLineCentroid = []
+        self.bottomLineYaw = []
 
         print("Robot Class initialized!")
         
@@ -531,7 +543,6 @@ class robot():
         for i in [8, 9]:
             self.placeBrick(i, verbose=True)
 
-    # TODO add some critical frames of the whole motion sequence.
     def pushBrick(self, offset, verbose=False):
         # lean forward.
         if verbose:
@@ -833,10 +844,159 @@ class robot():
         # self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
         # drawRigidBody(self.body_verticesGround, self.ax)
 
+    def initBottomCamera(self):
+        '''
+        Initialize the bottom camera with cv2 video capturer.
+        Output: the state of the camera capture, True/False.
+        '''
+        self.cap = cv2.VideoCapture(self.bottomCamSrc)  # the index of the source camera.
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.bottomCamRes[0])
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.bottomCamRes[1])
+        return self.cap.isOpened()
+
+    def _detectCircles(self, frame, minCircles = 3, savetomat = False, verbose = False, display = False):
+        
+        '''
+        Input: the cv2 captured frame (should be 120x160x3);
+        Output: a list containing the centroid and the mutual yaw matrix. None if no circle in the input frame.
+        '''
+
+        # Convert frame to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Apply median blur to reduce noise
+        gray_blurred = cv2.medianBlur(gray, 5)
+
+        # Detect circles using HoughCircles
+        # params can be tuned if necessary.
+        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=10, param1=50, param2=21, minRadius=2, maxRadius=10)  # default: param1=50, param2=30
+
+        # Ensure at least one circle was found
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            count = 0
+            centers = []
+            # iterate over each detected circle.
+            for circle in circles[0, :]:
+                count += 1
+                center = (circle[0], circle[1])  # Circle center
+                centers.append(center)
+                if verbose: print("No {} circle's center: {}".format(count, center))
+                radius = circle[2]  # Circle radius
+                if display: 
+                    # Draw a small circle at the center
+                    cv2.circle(frame, center, 2, (0, 255, 0), 1)
+                    # Draw the detected circle
+                    cv2.circle(frame, center, radius, (0, 0, 255), 1)
+                    # Put text.
+                    cv2.putText(frame, str(count), (center[0] - 2, center[1] - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            
+            centers = np.array(centers).reshape(-1, 2).astype('float')
+            centroid = np.mean(centers, axis = 0)
+
+            # init yaw storage.
+            yaw = []
+
+            if count >= minCircles:
+                # calculate the mutual gradient.
+                x = centers[:, 0]
+                y = centers[:, 1]
+                xx = x[:, np.newaxis]
+                yy = y[:, np.newaxis]
+                dx = xx - x
+                dy = yy - y
+                yaw = np.arctan(np.divide(dy, dx).copy()) * 180 / np.pi
+                if verbose: print("Mutual gradient of {} circles: \n{}".format(count, yaw))
+                # save to mat file.
+                if savetomat: savemat('zh_CircleOutput.mat', {"yaw": yaw})
+            else:
+                if verbose: print("Only {} circle detected, unable to calculate gradient.")
+
+            if display:
+                # Display the processed frame
+                cv2.imshow('Detected Circles', frame)       
+            return [centroid, yaw]
+        
+        else:
+            if verbose: print("No circle in this frame.")
+            if display:
+                # Display the processed frame
+                cv2.imshow('Detected Circles', frame)  
+            return None
+
+    def _computeYawFromMutualGradients(self, yaw, minCircles = 3, tolerance = 8, verbose = False):
+        '''
+        compute the 2D pose of the robot body based on the mutual yaw matrix returned by the 
+        circles.
+
+        Input: mutual yaw mtx, in degrees.
+        Output: an array containing 1 yaw (if only one line clustered), 
+                or 2 if two lines are clustered.
+        '''
+        lineYaw = np.array([])
+        entryVisited = np.zeros((yaw.shape)).astype('bool')  # boolean matrix to register which entry has been visited.
+        for row in range(yaw.shape[0]):
+            for column in range(yaw.shape[1]):
+                if entryVisited[row][column] == False and entryVisited[column][row] == False:
+                    idx = np.where(np.abs(yaw[row, :] - yaw[row, column]) <= tolerance)[0]  # search circles in the same row with a similar mutual yaw.
+                    if verbose: print("idx:\n{}\n".format(idx))
+                    if len(idx) >= minCircles:  # too few circles may result in noise.
+                            meanYaw = np.mean(yaw[row, idx])
+                            groupLine = np.where(np.abs(lineYaw - meanYaw) <= tolerance)[0]
+                            # if the registered group does not contain this yaw angle, 
+                            # add this yaw to the registered group.
+                            if groupLine.size == 0:  
+                                lineYaw = np.append(lineYaw, meanYaw)
+                            else:
+                                # update the mean yaw if this line already exists in the registered group.
+                                lineYaw[groupLine] = (lineYaw[groupLine] + meanYaw) / 2  
+                            # update the visited circles, including the symmetrical ones.
+                            entryVisited[row, idx] = True
+                            entryVisited[idx, row] = True
+                            if verbose:
+                                print("Line(s) found.\n")
+                                print("mean:\n{}\n".format(meanYaw))
+                                print("groupLine:\n{}\n".format(groupLine))
+                                print("lineYaw:\n{}\n".format(lineYaw))
+                                print("entryVisited:\n{}\n".format(entryVisited))
+                    else:
+                        if verbose: print("No lines found.\n")
+                        entryVisited[row, idx] = True
+                        entryVisited[idx, row] = True
+                    if verbose: print("----------------------------------------------------------")
+        # If more than 2 lines were clustered, this result should be dumped;
+        # if 2 lines were clustered but they are not orthogonal, this result should also be dumped.
+        if lineYaw.size > 2: lineYaw = np.array([None])
+        elif lineYaw.size == 2 and np.abs(np.abs(lineYaw[0] - lineYaw[1]) - 90) > tolerance: lineYaw = np.array([None])
+        elif lineYaw.size == 0: lineYaw = np.array([None])
+        return lineYaw
+
+    def getPoseFromCircles(self, minCircles = 3, verbose=False, display=False):
+        '''
+        To detect the circle patterns on the bricks for EACH FRAME.
+        Input: config params (minCircles means the frame will be dumped if there are 
+                less than this amount of circles).
+        Output: the centers of the detected circles. None if no frame is 
+                returned by the camera or no lines detected in the frame.
+        '''
+        ret, frame = self.cap.read()
+        if not ret:
+            print("ERROR: Camera not returning values.")
+            return None
+        ret1 = self._detectCircles(frame.copy(), minCircles=minCircles, display=display)
+        if ret1 != None:
+            self.bottomLineCentroid = ret1[0] - np.array(self.bottomCamRes) / 2
+            bottomLineYaw = self._computeYawFromMutualGradients(np.array(ret1[1]), minCircles=minCircles)
+            if bottomLineYaw.any() != None:  # only change the yaw when the detected yaw(s) is legitimate.
+                self.bottomLineYaw = bottomLineYaw
+            if verbose: print("centroid: [{:.2f}, {:.2f}] | yaw(s): {}\n".format(self.bottomLineCentroid[0], self.bottomLineCentroid[1], self.bottomLineYaw))
+            return [self.bottomLineCentroid, self.bottomLineYaw]
+        else:
+            # if nothing in the current frame return the previous result.
+            return [self.bottomLineCentroid, self.bottomLineYaw]
+
 
     def measurementUpdate(self, results, useCalibration = True):
-        # TODO: map to the body of dog.
-
         # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.
         # init storage.
         translations = np.array([])
