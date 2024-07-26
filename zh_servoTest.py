@@ -14,7 +14,7 @@ if __name__ == "__main__":
         # init basics.
         myTags = landmarks(hmRPYP, poseTags, None)  # tags use RPYP pose. Not specifying the axes.
         myBrickMap = brickMap(hmRPYG, None)
-        myRobot = robot(hmRPYG, None, poseTags, ser=ser, servoConfig="dog2ServoConfig.json")
+        myRobot = robot(hmRPYG, None, poseTags, ser=ser, servoConfig="dog3ServoConfig.json")
         myRobot.bodyPose[-1] = myBrickMap.brickThickness + myRobot.initFeetPos[0][1] - myRobot.linkageFrameOffsets[0][-1]
         myRobot.feetPosControl(myRobot.initFeetPos)
         myRobot.propagateAllLegJointPoses()
@@ -26,9 +26,9 @@ if __name__ == "__main__":
         myRobot.closeGripper()
         time.sleep(1)
         myRobot.placeBrickPhase1()
-        myRobot.pushBrick(40, verbose=True)
+        # myRobot.pushBrick(40, verbose=True)
         myRobot.placeBrickPhase2()
-        myRobot.leanBack(40, verbose=True)
+        # myRobot.leanBack(40, verbose=True)
         # myRobot.closeGripper()
         # myRobot.openGripper()
         myRobot.placeBrickPhase3()

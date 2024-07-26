@@ -2,11 +2,9 @@
 # X: pointing forwards; Y: pointing left; Z: pointing upwards
 # each column: x, y, z point coords,
 import numpy as np
-import sympy as sp
 import matplotlib.pyplot as plt
 import serial
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial.distance import cdist
 import time
 import os
 import json
@@ -17,72 +15,62 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 import pygame
 from pygame.locals import *
-import platform
-import cv2
-from scipy.io import savemat, loadmat
-from scipy.spatial import distance
+import math
 
-if platform.system() == "Linux":  # if on raspberry pi
-    # instantiate gpio control for the servos.
-    import subprocess
-    subprocess.run('sudo pigpiod', shell=True, check=True)
-    import pigpio
-    pi = pigpio.pi()
-
-    
-    # from WAVESHARE, establish serial connection.
-    def connect_serial(port, baudrate):
-        while True:
-            try:
-                ser = serial.Serial(port, baudrate)
-                print("Serial is connected: {}".format(ser.is_open))
-                return ser
-            except serial.SerialException as e:
-                print("Serial Disconnected:", e)
-                print("wait for 5 second for reconnecting...")
-                time.sleep(5)
-
-    ##kill the agetty serial
-    os.system("sudo systemctl stop serial-getty@ttyS0.service")
-    os.system("sudo chmod 777 /dev/ttyS0")
-
-    port = "/dev/ttyS0"
-    baudrate = 115200
-    ser = connect_serial(port, baudrate)
-    
-
-    def readIMU(ser):
-
-        # decode each line in the buffer.
+# temporarily skipped for omitting serial.
+'''
+# from WAVESHARE, establish serial connection.
+def connect_serial(port, baudrate):
+    while True:
         try:
-            value_str = ser.readline().decode().strip()
-        except Exception as e:
-            print(f"Error reading from serial port: {e}")
-            return None, None, None
+            ser = serial.Serial(port, baudrate)
+            print("Serial connected")
+            return ser
+        except serial.SerialException as e:
+            print("Serial Disconnected:", e)
+            print("wait for 5 second for reconnecting...")
+            time.sleep(5)
+
+##kill the agetty serial
+os.system("sudo systemctl stop serial-getty@ttyS0.service")
+os.system("sudo chmod 777 /dev/ttyS0")
+
+port = "/dev/ttyS0"
+baudrate = 115200
+ser = connect_serial(port, baudrate)
+
+def readIMU():
     
-        robot_time = re.search(r'Time: (\d+)', value_str)  # int
-        yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
-        dx = re.search(r'dx: (-?(\d+\.\d+|inf))', value_str)  # float
+    # decode each line in the buffer.
+    try:
+        value_str = ser.readline().decode().strip()
+    except Exception as e:
+        print(f"Error reading from serial port: {e}")
+        return None, None, None
+ 
+    robot_time = re.search(r'Time: (\d+)', value_str)  # int
+    yaw = re.search(r'Yaw: (-?\d+\.\d+)', value_str)  # float
+    dx = re.search(r'dx: (-?(\d+\.\d+|inf))', value_str)  # float
 
-        if robot_time:
-            # get the time in second
-            stamp = int(robot_time.group(1))
-        else:
-            stamp = None
+    if robot_time:
+        # get the time in second
+        stamp = int(robot_time.group(1))
+    else:
+        stamp = None
+        
+    if yaw:
+        yaw_out = yaw.group(1)
+    else:
+        yaw_out = None
+        
+    if dx:
+        dx_out = dx.group(1)
+    else:
+        dx_out = None
 
-        if yaw:
-            yaw_out = yaw.group(1)
-        else:
-            yaw_out = None
-
-        if dx:
-            dx_out = dx.group(1)
-        else:
-            dx_out = None
-
-        print(stamp, yaw_out, dx_out)
-        return stamp, yaw_out, dx_out
-
+    print(stamp, yaw_out, dx_out)
+    return stamp, yaw_out, dx_out
+'''
 groundCoords = np.array([[1.0, 0.0, 0.0],
                          [0.0, 1.0, 0.0],
                          [0.0, 0.0, 1.0]])
@@ -239,7 +227,7 @@ def drawRigidBody(vertices, ax):
         ax.plot3D(*zip(*vertices[link]), color="k", linewidth = 0.8)
 
 def drawRigidBodyOG(vertices):
-    # vertices is the 8 vertices of the robot rigid body.
+    # vertices is the 8 vertices of the robot rigid body. 12 lines
     links = [[0, 1], [1, 2], [2, 3], [3, 0],
             [4, 5], [5, 6], [6, 7], [7, 4],
             [0, 4], [1, 5], [2, 6], [3, 7]]
@@ -254,112 +242,11 @@ def drawRigidBodyOG(vertices):
             glVertex3dv(vertices[vertex])
     glEnd()
 
-# the experimental class for the flipping linkage for placing a brick.
-class flipLinkage():
-    def __init__(self, linkageS, linkageA, linkageB, linkageW) -> None:
-        '''
-        The linkage B (longer one) is connected to a servo, while the linkage A is not.
-        Refer to the Chebyshev Linkage Model. The inverse kinematics may not be solvable.
-        linkageW > linkageS, linkageA > linkageS and linkageA must not collide with the robot front.
-        '''
-        self.linkageA = linkageA  # meters.
-        self.linkageW = linkageW  # meters.
-        self.linkageS = linkageS  # meters.
-        self.linkageB = linkageB # meters.
-        self.E_PI = 180 / np.pi
-        # TODO use functions to auto calculate.
-        self.betaLim1 = 55 # degs.
-        self.betaLim2 = 20 
-        self._inverseKinematics(0)  # init the joint angles.
-    
-    def kinematics(self, angleBeta):
-        '''
-        Computes the joint angles of the linkages, given the driving servo angle.
-        Based on the vector constant rule.
-        '''
-        self.angleBeta = angleBeta
-
-        # when joint A is above linkageB.
-        if self.angleBeta >= self.betaLim1:
-            coeffs = np.array([[self.linkageA, self.linkageW, self.linkageS + self.linkageB * np.cos(self.angleBeta / 180 * np.pi)],
-                               [self.linkageA, self.linkageW, self.linkageB * np.sin(self.angleBeta / 180 * np.pi)]])
-
-            # init symbol variables.
-            alpha, theta = sp.symbols('alpha theta')
-
-            # list the two equations.
-            eqCos = sp.Eq(coeffs[0][0] * sp.cos(alpha) + coeffs[0][1] * sp.cos(theta), coeffs[0][2])
-            eqSin = sp.Eq(coeffs[1][0] * sp.sin(alpha) + coeffs[1][1] * sp.sin(theta), coeffs[1][2])
-
-            # solve alpha first.
-            cosTheta = (coeffs[0][-1] - coeffs[0][0] * sp.cos(alpha)) / coeffs[0][1]
-            sinTheta = (coeffs[1][-1] - coeffs[1][0] * sp.sin(alpha)) / coeffs[1][1]
-
-            # solve self.angleAlpha using triangulation.
-            eqTriangulation = sp.Eq(cosTheta ** 2 + sinTheta ** 2, 1)
-            self.angleAlpha = np.array(sp.solve(eqTriangulation, alpha))
-            self.angleAlpha = self.angleAlpha[(self.angleAlpha <= np.pi / 2) & (self.angleAlpha >= - np.pi / 2)][0]
-
-            # solve self.angleTheta by plugging in alpha.
-            cosThetaSol = cosTheta.subs(alpha, self.angleAlpha)
-            sinThetaSol = sinTheta.subs(alpha, self.angleAlpha)
-            self.angleTheta = sp.atan2(sinThetaSol, cosThetaSol).evalf() * self.E_PI
-            self.angleAlpha = self.angleAlpha * self.E_PI
-
-        elif self.angleBeta < self.betaLim1 and self.angleBeta >= self.betaLim2:
-            pass
-
-
-        print("Updated angleAlpha: {}".format(self.angleAlpha))
-        print("Updated angleTheta: {}".format(self.angleTheta))
-        print("Updated angleBeta: {}".format(self.angleBeta))
-        
-
-    def _calculateBetaLimits(self):
-        pass
-
-    def _inverseKinematics(self, targetAngle):
-        '''
-        The targetAngle is the tilt angle of the board in the body frame.
-        '''
-        if targetAngle == 180.0:
-            '''
-            When the board above is parallel to the body.
-            Solve using similar triangles.
-            '''
-            self.angleTheta = 180.0
-            OB = self.linkageB * (self.linkageW / (self.linkageW + self.linkageS))
-            OA = self.linkageA * (self.linkageW / (self.linkageW + self.linkageS))
-            self.angleAlpha = np.arccos((OA ** 2 + self.linkageW ** 2 - OB ** 2) / (2 * OA * self.linkageW)) * self.E_PI
-            self.angleBeta = 180 - np.arccos((OB ** 2 + self.linkageW ** 2 - OA ** 2) / (2 * OB * self.linkageW)) * self.E_PI
-        elif targetAngle > 0.0 and targetAngle < 90.0:
-            print("IK not available at theta={}!".format(targetAngle))
-            pass
-        elif targetAngle == 0.0:
-            self.angleTheta = 0.0
-            # similar triangles.
-            m = (self.linkageS * self.linkageB) / (self.linkageW - self.linkageS)
-            n = (self.linkageS * self.linkageA) / (self.linkageW - self.linkageS)
-            OB = self.linkageB + m
-            OA = self.linkageA + n
-            print(OB, OA)
-            print((self.linkageW ** 2 + OB ** 2 - OA ** 2) / (2 * self.linkageW * OB))
-            self.angleBeta = np.arccos((self.linkageW ** 2 + OB ** 2 - OA ** 2) / (2 * self.linkageW * OB)) * self.E_PI
-            print(self.angleBeta)
-            self.angleAlpha = (np.pi - np.arccos((n ** 2 + self.linkageS ** 2 - m ** 2) / (2 * self.linkageS * n))) * self.E_PI
-
-        print("IK angleAlpha: {}".format(self.angleAlpha))
-        print("IK angleTheta: {}".format(self.angleTheta))
-        print("IK angleBeta: {}".format(self.angleBeta))
-
-    def drawLinkages(self):
-        pass
-
 class robot():
-    def __init__(self, hm, ax, landmarks, ser, servoConfig=None, vidsrc = 1): # hm is the 4x4 homogeneous matrix, for different rotation orders.
+    def __init__(self, hm, ax, landmarks): # hm is the 4x4 homogeneous matrix, for different rotation orders.
         self.body_length = 0.18725  #  meter, actual size including the camera.
         self.body_width = 0.06533  #  meter, actual size.
-        self.body_thickness = 0.0376  #  meter, actual size without the RPi and lid.
+        self.body_thickness = 0.0376  #  meter, actual size without the RPi and lid (the basic board).
         # the centroid of the robot, also the origin of the rigid body frame.
         # Can be adjusted to comply with the actual turning center. If being adjusted, it should indicate the translation from the previous centroid to the new.
         self.center = np.array([0.0, 0.0, 0.0])
@@ -439,232 +326,54 @@ class robot():
                                                 [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]],  # RF leg
                                                 [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]]]).astype('float')  # RR leg
         # initial feet positions
-        self.initFeetPos = np.array([[0.0, 0.090, 0.045],
-                                     [0.0, 0.090, 0.045],
-                                     [0.0, 0.090, 0.045],
-                                     [0.0, 0.090, 0.045]])
+        self.initFeetPos = np.array([[0.0, 0.085, 0.025], # forward or backward,height of shoulder, the length of each legs' sprout
+                                     [0.0, 0.085, 0.025],
+                                     [0.0, 0.085, 0.025],
+                                     [0.0, 0.085, 0.025]])
         self.feetPosControl(self.initFeetPos)
 
-        # check the running platform.
-        # 0=Windows, 1=Raspberry Pi, 2=Linux, None=others.
-        self.onPlatform = self._checkPlatform()
-        print("Robot Class running on Platform {}".format(self.onPlatform))
+        # new added code by haocheng 7.15
+        self.M_PI = math.pi
+        self.WALK_LIFT_PROP = 0.25
+        self.WALK_LIFT = -0.02
+        self.WALK_RANGE = 0.02  #0.02
+        self.Rmat = np.array([[1, 2, 3],
+                         [4, 5, 6],
+                         [7, 8, 9]])
 
-        # init servo config files.
-        self.servoNo = [17, 27, 22]  # BCM of servo PWM pins.
-        self.servoCriticalAngles = {}
-        self.servoDefaultAngles = []
-        self.servoAngles = []
-        if servoConfig != None and self.onPlatform == 1:
-            with open(servoConfig, 'r', encoding='utf-8') as json_file:
-                self.servoCriticalAngles = json.load(json_file)
-            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
-            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
-            # init pins.
-            self._servoIOInit(50)
-            print("Servos initialized!")
+        self.tempR = np.array([[1, 2, 3],
+                          [4, 5, 6],
+                          [7, 8, 9]])
 
-        # composite brickMap class.
-        self.brickMap = brickMap(hmRPYG, None)
+        self.PosIMU = np.array([0.0, 0.0, 0.0])
 
-        # composite the serial class.
-        if ser != None:
-            self.ser = ser
+        self.WALK_EXTENDED_X = 0
+        self.WALK_EXTENDED_Z = 0.025
 
-        # set the resolution/source of the bottom camera.
-        self.bottomCamRes = (320, 240) # default (160, 120)
-        self.bottomCamSrc = vidsrc  # /video1 
 
-        # store the previous bottom camera poses.
-        self.bottomLineCentroid = []
-        self.bottomLineYaw = np.array([0.0])
-        self.walkDir = 0.0  # in degs.
-        self.denoConst = self.bottomCamRes[0] / (2 * np.sin(10 / 180 * np.pi))
-        self.previousCircles = 0
-        self.nextCircles = 0
-        self.lostVision = 0  # -1 if the traces disappeared on the left, 1 for right.
+        self.Com_to_Leg1 = np.array([[0.13 / 2], [0.055 / 2], [0.0]])
+        self.Proj_to_Leg1 = np.array([[0.13/ 2 + self.WALK_EXTENDED_X], [0.055 / 2 + self.WALK_EXTENDED_Z], [0.0]])
 
-        # store the global step from the ESP32.
-        self.globalStep = 0.0
+        self.Com_to_Leg2 = np.array([[-1.3 / 20], [0.55 / 20], [0.0]])
+        self.Proj_to_Leg2 = np.array([[-1.3 / 20 - self.WALK_EXTENDED_X], [0.55 / 20 + self.WALK_EXTENDED_Z], [0.0]])
 
-        print("Robot Class initialized!")
+        self.Com_to_Leg3 = np.array([[1.3 / 20], [-0.55 / 20], [0.0]])
+        self.Proj_to_Leg3 = np.array([[1.3 / 20 + self.WALK_EXTENDED_X], [-0.55 / 20 - self.WALK_EXTENDED_Z], [0.0]])
+
+        self.Com_to_Leg4 = np.array([[-1.3 / 20], [-0.55 / 20], [0.0]])
+        self.Proj_to_Leg4 = np.array([[-1.3 / 20 - self.WALK_EXTENDED_X], [-0.55 / 20 - self.WALK_EXTENDED_Z], [0.0]])
+
+        self.PosCom = np.array([[0.00], [-0.1], [0.00]])
+
+        self.TransPos = np.array([
+            [[1], [1], [1]],  # leg1
+            [[1], [1], [1]],  # leg2
+            [[1], [1], [1]],  # leg3
+            [[1], [1], [1]]  # leg4
+        ])
+
+        print("Robot class initialized!")
         
-    def _checkPlatform(self):
-        system = platform.system()
-        if system == "Windows":
-            return 0
-        elif system == "Linux":
-            try:
-                with open('/proc/device-tree/model') as model_file:
-                    model = model_file.read().lower()
-                    if 'raspberry pi' in model:
-                        return 1
-            except FileNotFoundError:
-                pass
-            return 2
-        else:
-            return None
-
-    def _servoIOInit(self, frequency):
-        for pin in self.servoNo:
-            pi.set_mode(pin, pigpio.OUTPUT)
-            pi.set_PWM_frequency(pin, frequency)
-
-    def singleServoCtrl(self, number_servo, angle, speed):
-        while angle != self.servoAngles[number_servo]:
-            self.servoAngles[number_servo] += min(max(angle-self.servoAngles[number_servo],-speed),speed)
-            pi.set_servo_pulsewidth(self.servoNo[number_servo], self.servoAngles[number_servo])
-            # time.sleep(0.01)
-
-    def resetPose(self):
-        self.singleServoCtrl(0, self.servoDefaultAngles[0], 1/2)
-        time.sleep(0.5)
-        self.singleServoCtrl(1, self.servoDefaultAngles[1], 1/2)
-        time.sleep(0.5)
-        self.singleServoCtrl(2, self.servoDefaultAngles[2], 1/2)
-        time.sleep(0.5)
-        print("Reset Linkage Pose.")
-
-    def openGripper(self):
-        print("Open Gripper.")
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1/2)
-
-    def closeGripper(self):
-        print("Close Gripper.")
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperFasten"], 1/2)
-
-    def placeBrickPhase1(self):
-        # progress 1~4.
-        for i in [1, 2, 3, 4]:
-            self.placeBrick(i, verbose=True)
-
-    def placeBrickPhase2(self):
-        # progress 5: release brick.
-        self.placeBrick(5, verbose=True)
-
-    def placeBrickPhase3(self):
-        # progress 6~7.
-        for i in [6, 7]:
-            self.placeBrick(i, verbose=True)
-
-    def placeBrickPhase4(self):
-        # progress 8~9.
-        for i in [8, 9]:
-            self.placeBrick(i, verbose=True)
-
-    def pushBrick(self, offset, verbose=False):
-        # lean forward.
-        if verbose:
-            print("Leaning Forward.")
-        dataCMD = json.dumps({'var':"swing", 'val':offset})  # offset in mm. positive offset -> leaning forward.
-        self.ser.write(dataCMD.encode())
-        time.sleep(8)  # wait until finish.
-
-    def leanBack(self, offset, verbose=False):
-        # reset pose.
-        if verbose:
-            print("Leaning Backwards.")
-        dataCMD = json.dumps({'var':"swing", 'val':-offset})
-        self.ser.write(dataCMD.encode())
-        time.sleep(5)  # wait until finish.
-
-    def placeBrick(self, progress, verbose=False):
-        # primarily called internally by other functions.
-        if progress == 1:
-            # linkage down.
-            if verbose:
-                print("Linkage Tilt.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageTilt"], 1/2)  # default speed is 1/10.
-            time.sleep(0.5)
-
-        if progress == 2:
-            # align brick.
-            if verbose:
-                print("Align Brick.")
-            self.singleServoCtrl(1, self.servoCriticalAngles["brickVertical"], 1/20)  # rotate brick board to vertical.
-            time.sleep(0.5)
-            self.singleServoCtrl(2, self.servoCriticalAngles["gripperAlign"], 1/2)  # gripper open
-            time.sleep(1)
-            self.singleServoCtrl(2, self.servoCriticalAngles["gripperFasten"], 1/2)  # gripper fasten
-            time.sleep(0.5)
-
-        if progress == 3:
-            # rotate brick.
-            if verbose:
-                print("Rotate Brick.")
-            self.singleServoCtrl(1, self.servoCriticalAngles["brickDown"], 1/50)  # changed
-            time.sleep(1)
-
-        if progress == 4:
-            # linkage down.
-            if verbose:
-                print("Linkage Down.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown"], 1/10)  # changed
-            time.sleep(1)
-
-        if progress == 5:
-            # release brick.
-            if verbose:
-                print("Release Brick.")
-            self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1/10)
-            time.sleep(2)
-
-        if progress == 6:
-            # linkage slightly up.
-            if verbose:
-                print("Linkage Slightly Up.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageSlightlyUp"], 1/2)
-            time.sleep(1)
-
-        if progress == 7:
-            # rotate brickboard.
-            if verbose:
-                print("Rotate Brickboard.")
-            self.singleServoCtrl(1, self.servoCriticalAngles["brickUp"], 1/2)
-            time.sleep(0.5)
-
-        if progress == 8:
-            # fasten gripper.
-            if verbose:
-                print("Fasten Gripper.")
-            self.singleServoCtrl(2, self.servoCriticalAngles["gripperClose"], 1/2)
-            time.sleep(0.5)
-
-        if progress == 9:
-            # linkages up.
-            if verbose:
-                print("Linkage Up.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
-
-    def readGlobalStep(self):
-        value_str = self.ser.readline().decode().strip()
-        # print("value_str:", value_str)
-        global_step_boolean = re.search(r'Global_Step: (-?\d+\.\d+)', value_str)
-        if global_step_boolean:
-            self.globalStep = float(global_step_boolean.group(1))
-        else:
-            self.globalStep = -1.0
-            print("WARNING: received string \"{}\" is not globalStep".format(value_str))
-
-    def buzzer(self, val):
-        '''
-        val: True (On) or False (Off)
-        '''
-        if val == True:
-            dataCMD = json.dumps({'var': "buzzer", 'val': 1})
-            self.ser.write(dataCMD.encode())
-            print("Buzzer On")
-        elif val == False:
-            dataCMD = json.dumps({'var': "buzzer", 'val': 0})
-            self.ser.write(dataCMD.encode())
-            print("Buzzer Off")
-        else:
-            print("\nERROR: invalid logic value for the buzzer.\n")
-
-    def buzzerPWM(self, val):
-        dataCMD = json.dumps({'var': "buzzerPWM", 'val': val})
-        self.ser.write(dataCMD.encode())
-
     def feetPosControl(self, positionMatrix):
         '''
         Controls 4 legs using '_inverseKinematics'.
@@ -675,8 +384,7 @@ class robot():
 
     def _inverseKinematics(self, legNo, targetX, targetY, targetZ):
         '''
-        The function for Inverse Kinematics for each leg. Four legs should be using this same function. Input legible values to prevent 
-        value unsteadiness.
+        The function for Inverse Kinematics for each leg. Four legs should be using this same function.
         Inputs: 1) serial number of the leg (No.1 to No.4); 2-4) target foot positions in the linkage model's coordinate frame;
         Outputs: None. It refreshes the linkageAngles internally when this function finishes.
 
@@ -698,7 +406,7 @@ class robot():
             LB = np.sqrt(L2C - self.LWxLW)
             angleAlpha = anglePsi + angleLambda - 90
         elif targetY == 0:
-            angleAlpha = np.arcsin(self.linkageW / targetZ) * self.E_PI  # ??? Why not arccos
+            angleAlpha = np.arcsin(np.divide(self.linkageW , targetZ)) * self.E_PI  # ??? Why not arccos
             L2C = targetZ ** 2 + targetY ** 2
             LC = np.sqrt(L2C)  # modified from source code.
             LB = np.sqrt(LC - self.LWxLW)  # modified from source code.
@@ -720,29 +428,43 @@ class robot():
         # 1) the rotation angle of the rear servo;
         # 2) the x and y position of the intersecting joint of linkageC and linkageB in the plane of the leg (frame origin is the midpoint between two servos).
         bufferS = np.sqrt((targetX + self.LSs2) ** 2 + LB ** 2)  # Euclidian distance from foot to the rear servo.
-        print("bufferS {} | self.LAxLA {} | self.L_CD {} | self.LExLE {} | self.linkageA {} ".format(bufferS, self.LAxLA, self.L_CD, self.LExLE, self.linkageA))
-        angleLambda = np.arccos((bufferS ** 2 + self.LAxLA - (self.L_CD + self.LExLE)) / (2 * bufferS * self.linkageA))  # the angle between bufferS and linkageA on the rear servo.
+        #angleLambda = np.arccos((bufferS ** 2 + self.LAxLA - (self.L_CD + self.LExLE)) / (2 * bufferS * self.linkageA))  # the angle between bufferS and linkageA on the rear servo.
+        cosine_value = (bufferS ** 2 + self.LAxLA - (self.L_CD + self.LExLE)) / (2 * bufferS * self.linkageA)
+        if -1 <= cosine_value <= 1:
+            angleLambda = np.arccos(cosine_value)
+        elif cosine_value > 1:
+            angleLambda = 1
+        else:
+            angleLambda = -1
+
         angleDelta = np.arctan2((targetX + self.LSs2), LB)  # angle btw bufferS and wiggle length.
         angleBeta = angleLambda - angleDelta  # the rotation angle of the rear linkageA around the Z axis of the rear servo joint. (i.e. angle y-y')
         angleTheta = self.aLCDE  # a fixed angle opposing to the linkageC-linkageD line.
-        angleOmega = np.arcsin((LB - np.cos(angleBeta) * self.linkageA) / self.sLEDC)  # an auxiliary angle.
-        # print("angleOmega: {}".format(angleOmega))
+        sine_value = (LB - np.cos(angleBeta) * self.linkageA) / self.sLEDC
+        if -1 <= sine_value <= 1:
+            angleOmega = np.arcsin(sine_value)
+        elif sine_value > 1:
+            angleOmega = 1
+        else:
+            angleOmega = -1
+
+        print("angleOmega: {}".format(angleOmega))
         angleNu = np.pi - angleTheta - angleOmega  # an auxiliary angle between linkageE and the horizontal plane of foot.
         dEX = np.cos(angleNu) * self.linkageE  # projection length of linkageE to the X-axis.
         dEY = np.sin(angleNu) * self.linkageE  # projection length of linkageE to the Y-axis.
-        # print("dEX, dEY: {} {}".format(dEX, dEY))
+        print("dEX, dEY: {} {}".format(dEX, dEY))
         angleMu = np.pi / 2 - angleNu  # angle btw linkageD and the horizontal plane of foot.
         dDX = np.cos(angleMu) * self.linkageD  # projection length of linkageD to the X-axis.
         dDY = np.sin(angleMu) * self.linkageD  # projection length of linkageD to the Y-axis.
         posBCX = targetX + dDX - dEX  # the X-coordinate of the intersection joint of linkageB and linkageC, in the plane of leg.
         posBCY = LB - dEY - dDY  # the Y-coordinate of the intersection joint of linkageB and linkageC, in the plane of leg.
-        # print("posBCX, posBCY: {} {}".format(posBCX, posBCY))
+        print("posBCX, posBCY: {} {}".format(posBCX, posBCY))
         self.linkageAngles[legNo - 1][3] = angleBeta * self.E_PI  # update the leg's rear servo rotation angle.
         self.linkageAngles[legNo - 1][4] = -(np.pi - (np.pi / 2 - angleBeta) - angleOmega) * self.E_PI - self.angleEpsilon
         self.anglesOutput[legNo - 1][2] = angleBeta * self.E_PI
 
         # ---- Step3 ---- #
-        # from "void simpleLinkageIK()", computing in the X-Y plane of the leg frame.
+        # from "void simpleLinkageIK()", computing in the X-Z plane of the leg frame.
         # This paragraph outputs:
         # 1) angleAlpha: drives the servo;
         # 2) angleDelta: the rotation angle of front linkageA for the linkage model (not used for output);
@@ -756,12 +478,28 @@ class robot():
             L2C = posBCY ** 2 + (posBCX - self.LSs2) ** 2
             LC = np.sqrt(L2C)  # the Euclidian distance from the joint to the front servo.
             angleLambda = np.arctan2((posBCX - self.LSs2), posBCY) * self.E_PI  # WILL BE NEGATIVE when the joint is behind the front servo.
-            anglePsi = np.arccos((self.LAxLA_LBxLB + L2C) / (2 * self.linkageA * LC)) * self.E_PI  # will always be positive.
+            #anglePsi = np.arccos((self.LAxLA_LBxLB + L2C) / (2 * self.linkageA * LC)) * self.E_PI  # will always be positive.
+            cosine_value_psi = (self.LAxLA_LBxLB + L2C) / (2 * self.linkageA * LC)
+            if -1 <= cosine_value_psi <= 1:
+                anglePsi = np.arccos(cosine_value_psi) * self.E_PI
+            elif cosine_value_psi > 1:
+                anglePsi = 1
+            else:
+                anglePsi = -1
+
             angleAlpha = 90 - angleLambda - anglePsi  # the offset of linkageA-front from the Y-axis.
-            angleOmega = np.arccos((self.LBxLB_LAxLA + + L2C) / (2 * LC * self.linkageB)) * self.E_PI
+            #angleOmega = np.arccos((self.LBxLB_LAxLA + + L2C) / (2 * LC * self.linkageB)) * self.E_PI
+            cosine_value_omega = (self.LBxLB_LAxLA + L2C) / (2 * LC * self.linkageB)
+            if -1 <= cosine_value_omega <= 1:
+                angleOmega = np.arccos(cosine_value_omega) * self.E_PI
+            elif cosine_value_omega > 1:
+                angleOmega = 1
+            else:
+                angleOmega = -1
+
             angleBeta = anglePsi + angleOmega
         angleDelta = 90 - angleAlpha - angleBeta  # the rotation angle of the front linkageA around the Z-axis of the front servo.
-        self.linkageAngles[legNo - 1][1] = angleDelta 
+        self.linkageAngles[legNo - 1][1] = -angleDelta-90
         self.linkageAngles[legNo - 1][2] = angleBeta  # rotation of linkageB around jointA-B axis-Z.
         self.anglesOutput[legNo - 1][1] = angleAlpha
 
@@ -772,7 +510,7 @@ class robot():
         for i in [1, 2, 3, 4]:
             self._propagateSingleLegJointPoses(i)
 
-    def _propagateSingleLegJointPoses(self, legNo, verbose=False):
+    def _propagateSingleLegJointPoses(self, legNo):
         '''
         This function calculates all the joint poses of a single leg in the ground coordinate frame.
         Propagation: Joint -> Previous Joint -> Servo Attached -> Origin of Linkage Frame -> Rigid Body -> Ground.
@@ -807,10 +545,85 @@ class robot():
         self.linkageCoordinatesGround[legNo - 1][1][3:] = BPoseGround[:3, -1].flatten()
         # ---- the linkageC ---- #
         CPoseGround = backAPoseGround.dot(hmRPYP(0, 0, self.linkageAngles[legNo - 1][4], np.array([0, self.linkageC, 0]).copy()))
-        if verbose:
-            print("CPoseGround: {}".format(CPoseGround))
+        print("CPoseGround: {}".format(CPoseGround))
         self.linkageCoordinatesGround[legNo - 1][3][:3] = R.from_matrix(CPoseGround[:3, :3]).as_euler('zyx', degrees = True)[::-1]
         self.linkageCoordinatesGround[legNo - 1][3][3:] = CPoseGround[:3, -1].flatten()
+
+
+    ## walk gait by haocheng 7.15
+    # cycleinput change from 0 to 1
+
+    def calculate_transmatrix_M(self, roll, pitch, yaw):
+        rotx = np.array([
+            [1, 0, 0],
+            [0, np.cos(roll), -np.sin(roll)],
+            [0, np.sin(roll), np.cos(roll)]
+        ])
+
+        roty = np.array([
+            [np.cos(pitch), 0, np.sin(pitch)],
+            [0, 1, 0],
+            [-np.sin(pitch), 0, np.cos(pitch)]
+        ])
+
+        rotz = np.array([
+            [np.cos(yaw), -np.sin(yaw), 0],
+            [np.sin(yaw), np.cos(yaw), 0],
+            [0, 0, 1]
+        ])
+
+
+        self.tempR = np.dot(rotz, roty)
+        self.Rmat = np.dot(self.tempR, rotx)
+
+    # calculate the x y z of single walk gait
+    def signlewalkgait(self,legno,cycleInput):
+        ## The first phase is the swing phase
+        if cycleInput < self.WALK_LIFT_PROP:
+            WLP = cycleInput / self.WALK_LIFT_PROP
+            if WLP < 0.5:
+                swing_height = (math.cos( (WLP * self.M_PI) + self.M_PI * 3 / 2)) * self.WALK_LIFT
+            else:
+                swing_height = (math.cos( (WLP - 0.5) * self.M_PI)) * self.WALK_LIFT
+
+            r_distance = (WLP * WLP) * self.WALK_RANGE - self.WALK_RANGE/ 2
+
+        else:
+
+            swing_height = 0
+            walk_prop = (cycleInput - self.WALK_LIFT_PROP) / (1 - self.WALK_LIFT_PROP)
+            r_distance = self.WALK_RANGE / 2 - self.WALK_RANGE * walk_prop
+
+        self.calculate_transmatrix_M(self.PosIMU[0],self.PosIMU[1],self.PosIMU[2])
+        if(legno==1):
+            TransCoord = np.dot(self.Rmat, self.Com_to_Leg1)
+            addtemp = np.add(self.PosCom, -TransCoord)
+            self.TransPos[legno - 1] = np.add(addtemp, self.Proj_to_Leg1)
+        if (legno == 2):
+            TransCoord = np.dot(self.Rmat, self.Com_to_Leg2)
+            addtemp = np.add(self.PosCom, -TransCoord)
+            self.TransPos[legno - 1] = np.add(addtemp, self.Proj_to_Leg2)
+        if (legno == 3):
+            TransCoord = np.dot(self.Rmat, self.Com_to_Leg3)
+            addtemp = np.add(self.PosCom, -TransCoord)
+            self.TransPos[legno - 1] = np.add(addtemp, self.Proj_to_Leg3)
+        if (legno == 4):
+            TransCoord = np.dot(self.Rmat, self.Com_to_Leg4)
+            addtemp = np.add(self.PosCom, -TransCoord)
+            self.TransPos[legno - 1] = np.add(addtemp, self.Proj_to_Leg4)
+
+        rDirection = 0 * self.M_PI / 180
+        z_distance = max(min(math.sin(rDirection) * r_distance, 0.15), -0.15)
+        x_distance = math.cos(rDirection) * r_distance
+
+
+
+        return swing_height,x_distance,z_distance
+
+    # just use this new function to avoid using inverse kinematics directly
+    def feetPosControl1(self,legno,x_distance,swing_height,z_distance):
+        if legno >= 1 and legno <= 4:
+            self._inverseKinematics(legno, x_distance,swing_height,z_distance)
 
 
     def drawAllLegLinkagesOG(self):
@@ -853,342 +666,44 @@ class robot():
         drawLineOG(self.linkageCoordinatesGround[legNo - 1][3][3:], posJointDE)
         drawLineOG(posJointDE, posFoot)
 
+
     def drawRobotBody(self):
-        self.body_verticesGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(self.body_vertices)
+
+        self.body_verticesGround = hmRPYG(*self.bodyPose[:3], self.bodyPose[3:]).dot(self.body_vertices) #The bodypose contains roll, pitch, yaw and x,y,x
         drawRigidBodyOG(self.body_verticesGround)
 
-    def forward(self, speed=50):
+    '''
+    def forward(speed=50):
         dataCMD = json.dumps({'var':"move", 'val':1})
-        self.ser.write(dataCMD.encode())
+        ser.write(dataCMD.encode())
         print('robot-forward')
     
-    def stopLR(self):
+    def stopLR():
         dataCMD = json.dumps({'var':"move", 'val':6})
-        self.ser.write(dataCMD.encode())
+        ser.write(dataCMD.encode())
         print('robot-stop')
 
-    def stopFB(self):
+    def stopFB():
         dataCMD = json.dumps({'var':"move", 'val':3})
-        self.ser.write(dataCMD.encode())
+        ser.write(dataCMD.encode())
         print('robot-stop')	
-
+    '''
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
         self.initialEstimate = self.updatedEstimate
 
-        # (optional) draw the pose of the center of robot.
+        # (optional) draw the pose of the center of robot. (with three coordinates)
         drawGround(self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]), self.ax, "")
 
         # (optional) update the rigid body vertices.
         # self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
         # drawRigidBody(self.body_verticesGround, self.ax)
 
-    def initBottomCamera(self):
-        '''
-        Initialize the bottom camera with cv2 video capturer.
-        Output: the state of the camera capture, True/False.
-        '''
-        self.cap = cv2.VideoCapture(self.bottomCamSrc)  # the index of the source camera.
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.bottomCamRes[0])
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.bottomCamRes[1])
-        return self.cap.isOpened()
-
-    def _detectSmallDots(self, frame, minDist = 20, minRadius = 2, maxRadius = 12, verbose = False):
-        '''
-        Detect the smaller dot patterns.
-        Output: the center coordinates of the patterns and the distance Matrix.
-        '''
-        # Convert frame to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Apply median blur to reduce noise
-        gray_blurred = cv2.medianBlur(gray, 5)
-
-        # Detect circles using HoughCircles
-        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=minDist, param1=50, param2=21, minRadius=minRadius, maxRadius=maxRadius)  # param1=50, param2=30
-
-        # Ensure at least one circle was found
-        if circles is not None:
-            circles = np.uint16(np.around(circles))
-            count = 0
-            centers = []
-
-            for circle in circles[0, :]:
-                count += 1
-                center = (circle[0], circle[1])  # Circle center
-                centers.append(center)
-                if verbose: print("No {} circle's center: {}".format(count, center))
-
-            centers = np.array(centers).reshape(-1, 2).astype('float')
-
-            if count > 1:
-                # get the mutual distance matrix.
-                disMtx = distance.cdist(centers, centers, metric='euclidean')
-                if verbose: print("disMtx: \n{}\n".format(disMtx))
-                return centers, disMtx
-            else:
-                print("Only {} circle detected, unable to calculate mutual distance.".format(count))
-                return centers, None
-            
-        else:
-             if verbose: print("No smaller dots in this frame.")
-             return None
-    
-    # function to detect the Manhattan centroid.
-    def _getManhattanCentroid(self, centers):
-        '''
-        Only use it when there is a crossing.
-        input: an np ndarray of centers of circles.
-        output: an 1x2 tuple of the manhattan centroid, which is one of the circle centers.
-        '''
-        # compute the mutual distance.
-        disMtx = distance.cdist(centers, centers, metric='euclidean')
-        # find the Manhattan centroid.
-        sumEucDis = np.sum(disMtx, axis=0)
-        mcIdx = np.argmin(sumEucDis)
-        mc = centers[mcIdx, :]
-        return mc
-    
-    def _groupCircles(self, centers, disMtx, disThres = 45.0, verbose = False):
-        '''
-        Detect the smaller dot patterns to get the relative pose of the next brick.
-        Amount of input centers should exceed 1.
-        '''
-        disMtxVisited = np.eye(disMtx.shape[0]).astype('bool')
-        group1 = np.array([])
-        group2 = np.array([])
-        for row in range(disMtx.shape[0]):
-            for column in range(disMtx.shape[1]):
-                if disMtxVisited[row, column] == True:
-                    continue
-                else:
-                    disMtxVisited[row, column] = True
-                    disMtxVisited[column, row] = True
-                    if disMtx[row, column] >= disThres:
-                        if row in group1:
-                            if column in group2:
-                                continue
-                            else:
-                                group2 = np.append(group2, column)
-                        elif row in group2:
-                            if column in group1:
-                                continue
-                            else:
-                                group1 = np.append(group1, column)
-                        else:
-                            if column in group1:
-                                group2 = np.append(group2, row)
-                            elif column in group2:
-                                group1 = np.append(group1, row)
-                            else:
-                                group1 = np.append(group1, row)
-                                group2 = np.append(group2, column)
-                    else:
-                        if row in group1:
-                            if column in group1:
-                                continue
-                            else:
-                                group1 = np.append(group1, column)
-                        elif row in group2:
-                            if column in group2:
-                                continue
-                            else:
-                                group2 = np.append(group2, column)
-                        else:
-                            if column in group1:
-                                group1 = np.append(group1, row)
-                            elif column in group2:
-                                group2 = np.append(group2, row)
-                            else:
-                                group1 = np.append(group1, row)
-                                group1 = np.append(group1, column)
-        '''
-        if len(np.intersect1d(group1, group2)) > 0:
-            group1 = np.union1d(group1, group2)
-            group2 = np.array([])
-        '''
-        if verbose: print("Group1: {} | Group2: {}\n".format(group1, group2))
-        comGroup1 = np.mean(centers[group1.astype('int')], axis=0)
-        comGroup2 = np.mean(centers[group2.astype('int')], axis=0)
-        if comGroup1[0] <= comGroup2[0]:  # related to the orientation of the camera.
-            self.previousCircles = len(group1)
-            self.nextCircles = len(group2)
-        else:
-            self.previousCircles = len(group2)
-            self.nextCircles = len(group1)
-        
-
-
-    def _detectCircles(self, frame, minCircles = 3, savetomat = False, verbose = False, display = False):
-        
-        '''
-        Input: the cv2 captured frame (should be 120x160x3);
-        Output: a list containing the centroid and the mutual yaw matrix. None if no circle in the input frame.
-        '''
-
-        # Convert frame to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Apply median blur to reduce noise
-        gray_blurred = cv2.medianBlur(gray, 5)
-
-        # Detect circles using HoughCircles
-        # params can be tuned if necessary.
-        # circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=10, param1=50, param2=21, minRadius=2, maxRadius=10)  # default: param1=50, param2=30
-        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=25, minRadius=4, maxRadius=20)
-
-        # Ensure at least one circle was found
-        if circles is not None:
-            circles = np.uint16(np.around(circles))
-            count = 0
-            centers = []
-            # iterate over each detected circle.
-            for circle in circles[0, :]:
-                count += 1
-                center = (circle[0], circle[1])  # Circle center
-                centers.append(center)
-                if verbose: print("No {} circle's center: {}".format(count, center))
-                radius = circle[2]  # Circle radius
-                if display: 
-                    # Draw a small circle at the center
-                    cv2.circle(frame, center, 2, (0, 255, 0), 1)
-                    # Draw the detected circle
-                    cv2.circle(frame, center, radius, (0, 0, 255), 1)
-                    # Put text.
-                    cv2.putText(frame, str(count), (center[0] - 2, center[1] - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-            
-            centers = np.array(centers).reshape(-1, 2).astype('float')
-            # find the Manhattan centroid.
-            centroid = self._getManhattanCentroid(centers)
-            # centroid = np.mean(centers, axis = 0)
-
-            # init yaw storage.
-            yaw = []
-
-            if count >= minCircles:
-                # calculate the mutual gradient.
-                x = centers[:, 0]
-                y = centers[:, 1]
-                xx = x[:, np.newaxis]
-                yy = y[:, np.newaxis]
-                dx = xx - x
-                dy = yy - y
-                yaw = np.arctan(np.divide(dy, dx).copy()) * 180 / np.pi
-                if verbose: print("Mutual gradient of {} circles: \n{}".format(count, yaw))
-                # save to mat file.
-                if savetomat: savemat('zh_CircleOutput.mat', {"yaw": yaw})
-            else:
-                if verbose: print("Only {} circle detected, unable to calculate gradient.")
-
-            if display:
-                # Display the processed frame
-                cv2.imshow('Detected Circles', frame)       
-            return [centroid, yaw]
-        
-        else:
-            if verbose: print("No circle in this frame.")
-            if display:
-                # Display the processed frame
-                cv2.imshow('Detected Circles', frame)  
-            return None
-
-    def _computeYawFromMutualGradients(self, yaw, minCircles = 3, tolerance = 8, verbose = False):
-        '''
-        compute the 2D pose of the robot body based on the mutual yaw matrix returned by the 
-        circles.
-
-        Input: mutual yaw mtx, in degrees.
-        Output: an array containing 1 yaw (if only one line clustered), 
-                or 2 if two lines are clustered.
-        '''
-        lineYaw = np.array([])
-        entryVisited = np.zeros((yaw.shape)).astype('bool')  # boolean matrix to register which entry has been visited.
-        for row in range(yaw.shape[0]):
-            for column in range(yaw.shape[1]):
-                if entryVisited[row][column] == False and entryVisited[column][row] == False:
-                    idx = np.where(np.abs(yaw[row, :] - yaw[row, column]) <= tolerance)[0]  # search circles in the same row with a similar mutual yaw.
-                    if verbose: print("idx:\n{}\n".format(idx))
-                    if len(idx) >= minCircles:  # too few circles may result in noise.
-                            meanYaw = np.mean(yaw[row, idx])
-                            groupLine = np.where(np.abs(lineYaw - meanYaw) <= tolerance)[0]
-                            # if the registered group does not contain this yaw angle, 
-                            # add this yaw to the registered group.
-                            if groupLine.size == 0:  
-                                lineYaw = np.append(lineYaw, meanYaw)
-                            else:
-                                # update the mean yaw if this line already exists in the registered group.
-                                lineYaw[groupLine] = (lineYaw[groupLine] + meanYaw) / 2  
-                            # update the visited circles, including the symmetrical ones.
-                            entryVisited[row, idx] = True
-                            entryVisited[idx, row] = True
-                            if verbose:
-                                print("Line(s) found.\n")
-                                print("mean:\n{}\n".format(meanYaw))
-                                print("groupLine:\n{}\n".format(groupLine))
-                                print("lineYaw:\n{}\n".format(lineYaw))
-                                print("entryVisited:\n{}\n".format(entryVisited))
-                    else:
-                        if verbose: print("No lines found.\n")
-                        entryVisited[row, idx] = True
-                        entryVisited[idx, row] = True
-                    if verbose: print("----------------------------------------------------------")
-        # If more than 2 lines were clustered, this result should be dumped;
-        # if 2 lines were clustered but they are not orthogonal, this result should also be dumped.
-        if lineYaw.size > 2: lineYaw = np.array([None])
-        elif lineYaw.size == 2 and np.abs(np.abs(lineYaw[0] - lineYaw[1]) - 90) > tolerance: lineYaw = np.array([None])
-        elif lineYaw.size == 0: lineYaw = np.array([None])
-        return lineYaw
-
-    def getPoseFromCircles(self, minCircles = 3, verbose=False, display=False):
-        '''
-        To detect the circle patterns on the bricks for EACH FRAME.
-        Input: config params (minCircles means the frame will be dumped if there are 
-                less than this amount of circles).
-        Output: the centers of the detected circles. None if no frame is 
-                returned by the camera or no lines detected in the frame.
-        '''
-        ret, frame = self.cap.read()
-        if not ret:
-            print("ERROR: Camera not returning values.")
-            return None
-        
-        ret1 = self._detectCircles(frame.copy(), minCircles=minCircles, display=display)
-        retSmall = self._detectSmallDots(frame.copy(), verbose=verbose)
-
-        # process the large circle traces.
-        if ret1 != None:
-            self.bottomLineCentroid = ret1[0] - np.array(self.bottomCamRes) / 2
-            self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[1], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
-            bottomLineYaw = self._computeYawFromMutualGradients(np.array(ret1[1]), minCircles=minCircles, verbose=verbose)
-            if bottomLineYaw.any() != None:  # only change the yaw when the detected yaw(s) is legitimate.
-                self.bottomLineYaw = bottomLineYaw
-                self.lostVision = 0
-            else:
-                if self.bottomLineCentroid[1] <= 0:
-                    self.lostVision = -1
-                else:
-                    self.lostVision = 1
-            if verbose: print("Manhattan Centroid: [{:.2f}, {:.2f}] | walkDir: {} | yaw(s): {}\n".format(self.bottomLineCentroid[0], self.bottomLineCentroid[1], self.walkDir, self.bottomLineYaw))
-            # return [self.bottomLineCentroid, self.bottomLineYaw]
-
-        # process the small dot patterns.
-        if retSmall != None:
-            # print("retSmall[1]: ", retSmall[1])
-            if retSmall[1] is None:
-                # only one dot detected, either up or down the short side of the brick.
-                # TODO: reserve a stair detection API. The following is just temporary.
-                self.previousCircles = 1
-                self.nextCircles = 0
-            else:
-                # more the 1 dot detected.
-                self._groupCircles(retSmall[0], retSmall[1])
-        # else:
-            # if nothing in the current frame return the previous result.
-            # return [self.bottomLineCentroid, self.bottomLineYaw]
-
 
     def measurementUpdate(self, results, useCalibration = True):
-        # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.
+        # TODO: map to the body of dog.
+
+        # handle multiple tags: tags -> poses from each tag -> eliminate the craziest one -> average over the rest.
         # init storage.
         translations = np.array([])
         eulerAngles = np.array([])
@@ -1314,6 +829,7 @@ class robot():
         poseProposal = (self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:])).dot(brickPoseBodyFrame)
 
 
+
 class brickMap():
     def __init__(self, hm, ax) -> None:
         '''
@@ -1412,15 +928,14 @@ trajectory = np.array([[0.0, 0.994 - 0.20, 0.994 - 0.20, 0.0, 0.0],  # x coordin
                        [0.0, 0.0, 0.0, 0.0, 0.0]])  # z coordinate
 
 # tag grouping, each row represents the tagIDs on the same board.
-
+'''
 tagGroups = np.array([[3, 4, 5],
                       [1, 7, 6],
                       [8, 9, 0],
                       [2, 10, 11]])
+'''  
 
-'''
 tagGroups = np.array([[15, 16, 17]])  # tag 15~17 are only for DEMO USE.
-'''
 
 # function of Yaw and X, Z calibration.
 def calibratePose2D(yaw, trans):
@@ -1504,7 +1019,7 @@ class brickMap():
         Init the class to store brick model and update the brick map.
         '''
         self.hm = hm
-        # self.ax = ax
+        self.ax = ax
         self.brickLength = 0.40 # meter
         self.brickWidth = 0.20
         self.brickThickness = 0.015
@@ -1517,7 +1032,6 @@ class brickMap():
                                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
         # self.map = np.zeros(6).astype('float')  # to store the poses of the bricks as maps.
         self.map = np.array([])  # to utilize the append attribute of lists. len = No. of bricks.
-        print("brickMap Initialized!")
 
     def place(self, pose):  # pose is a list len = 6.
         # TODO: detect collision and layer.
@@ -1586,13 +1100,13 @@ def keyboardCtrl(angleStep = 1, zoom_sensitivity = 0.001):
             if event.key == pygame.K_DOWN:
                 glTranslatef(0, 0.025, 0)
         if event.type == MOUSEBUTTONDOWN:
-            if event.button == 1:
+            if event.button == 4:
                 glRotatef(angleStep, 1, 0, 0)
-            elif event.button == 3:
+            elif event.button == 5:
                 glRotatef(angleStep, 0, 0, 1)
-            elif event.button == 4:  # wheel up.
+            elif event.button == 1:  # wheel up.
                 glTranslatef(0.0, 0.0, zoom_sensitivity)
-            elif event.button == 5: 
+            elif event.button == 3:
                 glTranslatef(0.0, 0.0, -zoom_sensitivity)
 
 def drawFloor():

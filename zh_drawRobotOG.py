@@ -22,9 +22,15 @@ if __name__ == "__main__":
     try:
         myTags = landmarks(hmRPYP, poseTags, None)  # tags use RPYP pose. Not specifying the axes.
         myBrickMap = brickMap(hmRPYG, None)
-        myRobot = robot(hmRPYG, None, poseTags)
+        myRobot = robot(hmRPYG, None, poseTags, None)
         myRobot.bodyPose[-1] = myBrickMap.brickThickness + myRobot.initFeetPos[0][1] - myRobot.linkageFrameOffsets[0][-1]
-        myRobot.feetPosControl(myRobot.initFeetPos)
+        y = 0.033
+        z = 0.027
+        poseTest = np.array([[0.0, y, z],
+                             [0.0, y, z],
+                             [0.0, y, z],
+                             [0.0, y, z]])
+        myRobot.feetPosControl(poseTest)
         myRobot.propagateAllLegJointPoses()
 
         pygame.init()  # init the pygame lib.

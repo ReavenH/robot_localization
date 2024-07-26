@@ -174,6 +174,10 @@ void serialCtrl(){
         }
       }
 
+      else if(docReceive["var"] == "buzzerPWM"){
+        ledcWriteTone(1, val);
+      }
+
       //modified 3/2/2024, add a command to change lift height
       else if(docReceive["var"] == "ChangeClearance"){
         double D_val = val;

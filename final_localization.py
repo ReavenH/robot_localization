@@ -458,6 +458,15 @@ def startwalk():
 	time.sleep(0.1)
 	print('start testing')
 
+def startwalknew():
+	dataCMD = json.dumps({'var':"move", 'val':1})
+	ser.write(dataCMD.encode())
+	time.sleep(0.1)
+
+def stopwalknew():
+	dataCMD = json.dumps({'var':"move", 'val':3})
+	ser.write(dataCMD.encode())
+	time.sleep(0.1)
 
 def freewalk(degree,distance=30):
 	print('freewalk direction: ',degree,' distance: ',distance)
@@ -466,6 +475,18 @@ def freewalk(degree,distance=30):
 	ser.write(dataCMD.encode())
 	time.sleep(0.1)
 	
+def freetrot(degree,distance=40):
+	print('freetrot direction: ',degree,' distance: ',distance)
+	dataCMD = json.dumps({'var':"freetrot", 'val':degree, 'dis':distance})
+	ser.write(dataCMD.encode())
+	time.sleep(0.1)
+
+def triangularwalk(degree,distance=40):
+	print('TriangularWalk direction: ',degree,' distance: ',distance)
+	dataCMD = json.dumps({'var':"TriangularWalk", 'val':degree, 'dis':distance})
+	ser.write(dataCMD.encode())
+	time.sleep(0.1)
+
 def freeclimb(degree):
 	print('freeclimb direction: ',degree)
 	dataCMD = json.dumps({'var':"freeclimb", 'val':degree})

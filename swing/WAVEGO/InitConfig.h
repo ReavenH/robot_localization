@@ -359,7 +359,12 @@ void allDataUpdate(){
 // <<<<<<<<<<========BUZZER==========>>>>>>>>>>
 void InitBuzzer(){
   pinMode(BUZZER, OUTPUT);
+  // NEW Jun.22.
+  // ledcSetup(1, 5000, 13);  // LEDC_TIMER_1
+  // ledcAttachPin(BUZZER, 1); // LEDC_CHANNEL_1
+  // ledcWriteTone(1, 8191);
   digitalWrite(BUZZER, HIGH);
+  // ledcWriteTone(1, 0);  // init to mute
 }
 
 
