@@ -1,0 +1,315 @@
+walk_height 不要低于95
+
+#forward
+{'var': "move", 'val': 1}
+
+#STOP
+{'var': "move", 'val': 3}
+
+#TURN RIGHT
+{'var': "move", 'val': 4}
+
+#backward
+{'var': "move", 'val': 5}
+
+{'var': "ChangeClearance", 'val': 10}
+
+{'var': "TimeInterval", 'val': 10}
+
+#triangular gait
+{'var': "funcMode", 'val': 6}
+
+#climb gait
+{'var': "funcMode", 'val': 7}
+
+#auto gait
+{'var': "funcMode", 'val': 10}
+
+#round gait
+{'var': "funcMode", 'val': 11}
+
+#using round gait to test friction
+{'var': "funcMode", 'val': 12}
+
+----------------------------------success
+#using new gait
+{'var': "funcMode", 'val': 13}
+
+---------------------------------success
+#using turning gait
+{'var': "funcMode", 'val': 14}
+
+#using balance gait
+{'var': "funcMode", 'val': 15}
+
+-----------------------------------success
+#using balance new gait
+{'var': "funcMode", 'val': 16}
+
+
+{'var': "crabwalk", 'val': 1} -> turn left 15degree
+{'var': "crabwalk", 'val': 0} -> turn right 15degree
+
+#turning only once and adjustable
+{'var': "funcMode", 'val': 17}
+#gait_type = 9
+
+#turning degree
+{'var': "funcMode", 'val': 18}
+#gait_type = 10
+// change targetyaw in the newGait/TurningDegreeGait
+{'var': "AdjustYaw", 'val': 10}
+
+{'var': "AdjustMass", 'val': 10}
+
+############################ PID Controller #################
+{'var': "AdjustMass", 'val': 4}
+
+{'var': "AdjustP_Pitch", 'val': 1}
+{'var': "AdjustP_Roll", 'val': 0.2}
+
+{'var': "AdjustI_Pitch", 'val': 0.02}
+{'var': "AdjustI_Roll", 'val': 0.02}
+
+{'var': "AdjustD_Pitch", 'val': 0.01}
+{'var': "AdjustD_Roll", 'val': 0.01}
+#############################################
+
+
+#chhange degree bias from  (0 to 360 degree)
+
+{'var': "AdjustDegBias", 'val': 90}
+
+
+
+
+extern double Kp_pitch;
+extern double Ki_pitch;
+// const double Kd_pitch = 0.01;
+extern double Kp_roll;
+extern double Ki_roll;
+
+
+else if(docReceive["var"] == "move"){
+        debugMode = 0;
+        funcMode  = 0;
+        digitalWrite(BUZZER, HIGH);
+        switch(val){
+          case 1: moveFB = 1; Serial.println("Forward");break;
+          case 2: moveLR =-1; Serial.println("TurnLeft");break;
+          case 3: moveFB = 0; Serial.println("FBStop");break;
+          case 4: moveLR = 1; Serial.println("TurnRight");break;
+          case 5: moveFB =-1; Serial.println("Backward");break;
+          case 6: moveLR = 0; Serial.println("LRStop");break;
+
+
+extern bool upper_flag = flase;
+extern float turning_direction;
+extern bool crab_gait; 
+
+{'var': "freewalk", 'val': 30}
+{'var': "crabwalk", 'val': 1}
+//其实不需要crab walk，直接{'var': "freewalk", 'val': +-90} 就好了
+
+
+
+{'var': "freewalk", 'val': 30}
+
+{'var': "freeclimb", 'val': 30}
+
+{'var': "reset"}
+
+
+对于旋转，val>0 的话是逆时针
+//转完之后会回到正方向
+{'var': "freeturn", 'val': 30}
+
+//转完之后不会回到正方向，有利于下一次继续转
+{'var': "freerotate", 'val': 30}
+
+
+// change targetyaw in the newGait/TurningDegreeGait
+
+{'var': "AdjustYaw", 'val': 10}
+
+{'var': "funcMode", 'val': 18}
+
+
+{'var': "crabwalk", 'val': 1} -> turn left 15degree
+{'var': "crabwalk", 'val': 0} -> turn right 15degree
+
+{'var': "freeturn", 'val': 10}
+
+{'var': "funcMode", 'val': 17}
+
+
+
+只有move=1时，global step才会转动
+
+
+通信问题：
+1. 传10次数据之后就会断连
+2. uart， raspberry pi和esp32
+3. ttyS0
+4. 5秒一次
+排除了threading 的原因
+
+现在发现kill掉了agetty进程之后好了很多，用这个指令：sudo systemctl stop serial-getty@ttyS0.service
+
+问题解决了，就是线程抢占了
+
+另外不要改esp32中的这个代码，之前改了（放到serialCtrl中并且数据改成2000/1000）容易卡死
+StaticJsonDocument<200> docReceive;
+StaticJsonDocument<100> docSend;
+
+
+现在可以用serial读取下位机的global step数值了，更利于我们做出判断
+
+
+
+{'var': "reset"}
+
+{'var': "freewalk", 'val': 0,'dis': 20}
+
+{'var': "freeclimb", 'val': 30}
+
+{'var': "AdjustFBcom", 'dval': 20}
+{'var': "freetrot", 'val': 0,'dis': 20}
+
+
+
+################ test trot ###########
+
+functionActionF
+
+{'var': "freetrot", 'val': 0,'dis': 0}
+
+
+#连续走
+{'var': "move", 'val': 1}
+
+#只走一次
+{'var': "move", 'val': 3}
+
+
+
+#### TROT ####
+#调整行走时前后的重心位置
+{'var': "AdjustFBcom", 'dval': 20}
+{'var': "AdjustLRcom", 'dval': 0}
+#调整默认的PID_X : pitch 和 PID_Z : roll
+{'var': "AdjustPIDX", 'dval': -0.5}
+{'var': "AdjustPIDZ", 'dval': 0}
+{'var': "AdjustHeight", 'dval': 95}
+
+
+
+*****************************************************
+{'var': "move", 'val': 1}
+
+{'var': "freetrot", 'val': 0,'dis': 20}
+
+{'var': "move", 'val': 3}
+
+
+
+
+#### TROT 3 ####
+
+{'var': "move", 'val': 1}
+
+{'var': "freetrot", 'val': 0,'dis': 30}
+
+{'var': "move", 'val': 3}
+
+#调整行走时前后的重心位置
+{'var': "AdjustFBcom", 'dval': 20}
+{'var': "AdjustLRcom", 'dval': 0}
+#调整默认的PID_X : pitch 和 PID_Z : roll
+{'var': "AdjustPIDX", 'dval': -0.5}
+{'var': "AdjustPIDZ", 'dval': 0}
+{'var': "AdjustHeight", 'dval': 100}
+walk_lift  = 30
+
+
+****************************************************
+
+
+暂时用这个
+#### TROT 2 ####
+#调整行走时前后的重心位置
+{'var': "AdjustFBcom", 'dval': 10}
+{'var': "AdjustLRcom", 'dval': 1}
+#调整默认的PID_X : pitch 和 PID_Z : roll
+{'var': "AdjustPIDX", 'dval': -0.5}
+{'var': "AdjustPIDZ", 'dval': 0}
+{'var': "AdjustHeight", 'dval': 100}
+walk_lift  = 20
+
+void functionActionF(){
+
+  //controls the portion of lift 
+  WALK_LIFT_PROP = 0.4;
+  WALK_RANGE = 20;
+
+  //controls the walk height
+  WALK_HEIGHT_MAX  = 115;
+  WALK_HEIGHT_MIN  = 50;
+  WALK_HEIGHT      = 95; //100
+
+
+  WALK_EXTENDED_Z = 30;    //30
+  WALK_EXTENDED_X  = 0;
+  WALK_LIFT = 30;  //25
+
+  STEP_ITERATE = 0.0375;// STEP_ITERATE = 0.025;
+
+  STEP_DELAY = 0.4;   //0.5
+  //Gait type is 5 means using new gait
+  GAIT_TYPE = 4;
+  //bias mulltiple the right two legs
+  // right_leg_bias = 1.2;
+  right_leg_bias = 1;
+
+}
+
+  double target_x=0.0;
+  // the threshold for pitch and roll each time, not the final value
+  float Once_Pitch_threshold = 10.0;
+  float Once_Roll_threshold = 5.0;     //10.0
+
+  Adjust_Pitch = Adjust_Pitch - (max(min(pitch - target_pitch,Once_Pitch_threshold),-Once_Pitch_threshold) * 0.01);  //0.01
+  Adjust_Roll = Adjust_Roll + (max(min(roll - target_roll,Once_Roll_threshold),-Once_Roll_threshold) * 0.005);     //0.005
+
+  double Adjust_Pitch_threshold = 10.0;
+  double Adjust_Roll_threshold = 1.0;     //5.0
+  Adjust_Pitch = max(min(Adjust_Pitch,Adjust_Pitch_threshold),-Adjust_Pitch_threshold);
+  Adjust_Roll = max(min(Adjust_Roll,Adjust_Roll_threshold),-Adjust_Roll_threshold);
+
+
+调整目标pitch和roll，主要是roll，让机器人走直线
+
+{'var': "TargetRoll", 'dval': 1}
+{'var': "TargetPitch", 'dval': 0}
+
+
+1.walk_height = 100, walk_lift = 25
+	kp = 0.015
+	kr = 0.01
+	thred_p = 15
+	thred_r = 10
+
+
+
+
+#####
+{'var': "freetrot", 'val': -20,'dis': 20}
+
+{'var': "AdjustYaw", 'val': 10}
+{'var': "AdjustRoll", 'val': 10}
+
+
+AdjustFBcom
+
+
+{'var': "swing", 'val': 20}

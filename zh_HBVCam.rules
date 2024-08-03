@@ -1,0 +1,1 @@
+SUBSYSTEM=="video4linux", ATTR{idVendor}=="038f", ATTR{idProduct}=="6001", SYMLINK+="video1"
