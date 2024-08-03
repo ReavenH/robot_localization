@@ -89,7 +89,7 @@ def detect_and_display_circles(frame, minDist = 10, minRadius = 15, maxRadius = 
     gray_blurred = cv2.medianBlur(gray, 5)
     
     # Detect circles using HoughCircles
-    circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=minDist, param1=50, param2=21, minRadius=minRadius, maxRadius=maxRadius)  # param1=50, param2=30
+    circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=minDist, param1=48, param2=19, minRadius=minRadius, maxRadius=maxRadius)  # param1=50, param2=30
     
     # Ensure at least one circle was found
     if circles is not None:
@@ -110,6 +110,7 @@ def detect_and_display_circles(frame, minDist = 10, minRadius = 15, maxRadius = 
             cv2.circle(frame, center, radius, (0, 0, 255), 1)
             # Put text.
             cv2.putText(frame, str(count), (center[0] - 2, center[1] - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            cv2.putText(frame, str(radius), (center[0] + 2, center[1] + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
         if count > 1:
             centers = np.array(centers).reshape(-1, 2).astype('float')
@@ -147,15 +148,14 @@ def detect_and_display_circles(frame, minDist = 10, minRadius = 15, maxRadius = 
     else:
          print("No circle in this frame.")
          displayFrame(frame)
-         return centers, None
+         return None, None
 
 # Open the camera (0 is usually the default camera)
-cap = cv2.VideoCapture(1)
-
+cap = cv2.VideoCapture("/dev/video1")
 
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
 while cap.isOpened():
     # Capture frame-by-frame
@@ -165,11 +165,11 @@ while cap.isOpened():
     
     # detect_and_display_circles(frame, minDist=10, minRadius=2, maxRadius=10)  # 160x120
     # detect_and_display_circles(frame, minDist=20, minRadius=13, maxRadius=20)  # 320x240, circle traces.
-    centers, disMtx = detect_and_display_circles(frame, minDist=20, minRadius=2, maxRadius=12)
+    centers, disMtx = detect_and_display_circles(frame, minDist=13, minRadius=4, maxRadius=8)
     
     # Group stigmergy circles.
-    
-    groupCircles(centers, disMtx)
+    if centers is not None:
+        groupCircles(centers, disMtx)
     print("Previous Cicles: {} | Next Circles: {}\n".format(previousCircles, nextCircles))
     print("-----------------------------------------------------------------------------")
 

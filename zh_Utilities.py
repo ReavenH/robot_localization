@@ -21,6 +21,7 @@ import platform
 import cv2
 from scipy.io import savemat, loadmat
 from scipy.spatial import distance
+from collections import deque
 
 if platform.system() == "Linux":  # if on raspberry pi
     # instantiate gpio control for the servos.
@@ -356,7 +357,7 @@ class flipLinkage():
         pass
 
 class robot():
-    def __init__(self, hm, ax, landmarks, ser, servoConfig=None, vidsrc = 1): # hm is the 4x4 homogeneous matrix, for different rotation orders.
+    def __init__(self, hm, ax, landmarks, ser, config=None, vidsrc = 1): # hm is the 4x4 homogeneous matrix, for different rotation orders.
         self.body_length = 0.18725  #  meter, actual size including the camera.
         self.body_width = 0.06533  #  meter, actual size.
         self.body_thickness = 0.0376  #  meter, actual size without the RPi and lid.
@@ -453,11 +454,13 @@ class robot():
         # init servo config files.
         self.servoNo = [17, 27, 22]  # BCM of servo PWM pins.
         self.servoCriticalAngles = {}
+        self.config = {}
         self.servoDefaultAngles = []
         self.servoAngles = []
-        if servoConfig != None and self.onPlatform == 1:
-            with open(servoConfig, 'r', encoding='utf-8') as json_file:
+        if config != None and self.onPlatform == 1:
+            with open(config, 'r', encoding='utf-8') as json_file:
                 self.servoCriticalAngles = json.load(json_file)
+                self.config = self.servoCriticalAngles
             self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
             self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
             # init pins.
@@ -476,16 +479,37 @@ class robot():
         self.bottomCamSrc = vidsrc  # /video1 
 
         # store the previous bottom camera poses.
-        self.bottomLineCentroid = []
+        self.bottomLineCentroid = [0.0, 0.0]
         self.bottomLineYaw = np.array([0.0])
         self.walkDir = 0.0  # in degs.
-        self.denoConst = self.bottomCamRes[0] / (2 * np.sin(10 / 180 * np.pi))
+        self.denoConst = self.bottomCamRes[0] / (1 * np.sin(2 / 180 * np.pi))
         self.previousCircles = 0
         self.nextCircles = 0
         self.lostVision = 0  # -1 if the traces disappeared on the left, 1 for right.
+        self.horizontalLimit = 90 # in pixels, will adjust the dog's position for better visibility if the com exceeds this value.
+        self.entryDir = np.array([])
 
         # store the global step from the ESP32.
         self.globalStep = 0.0
+
+        # store the dynamic state..
+        self.isMoving = False
+
+        # whether the robot is at a crossing.
+        self.atCrossing = False  # True means detects a crossing.
+        self.prevCrossing = False  # whether the robot was at a crossing at the previous time step.
+        self.atCrossingFIFO = deque([False]*17, maxlen=17)  # a FIFO window to decide whether the robot is at a crossing based on the proportion.
+        self.countCrossing = 0  # to count the number of the crossings that have passed.
+
+        # the motionController's params.
+        self.yawTolerance = 4  # the target range of the freeturn movement.
+        self.yawThreshold = 8  # the robot will stop and turn when the yaw exceeds this limit.
+        self.isturn = False  # the flag whether the robot should continue to freeturn.
+        
+        # the movement schedular's params.
+        # the first will always be F.
+        self.path = "FFFFFFFFFFFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
+        self.currentAction = "S"
 
         print("Robot Class initialized!")
         
@@ -559,6 +583,8 @@ class robot():
         dataCMD = json.dumps({'var':"swing", 'val':offset})  # offset in mm. positive offset -> leaning forward.
         self.ser.write(dataCMD.encode())
         time.sleep(8)  # wait until finish.
+        # change the walk clearance to default.
+        # self.changeclearance()
 
     def leanBack(self, offset, verbose=False):
         # reset pose.
@@ -567,6 +593,8 @@ class robot():
         dataCMD = json.dumps({'var':"swing", 'val':-offset})
         self.ser.write(dataCMD.encode())
         time.sleep(5)  # wait until finish.
+        # change the walk clearance to default.
+        # self.changeclearance()
 
     def placeBrick(self, progress, verbose=False):
         # primarily called internally by other functions.
@@ -636,6 +664,103 @@ class robot():
                 print("Linkage Up.")
             self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
 
+    def triangularwalk(self, degree, distance=40, wait=1.5, token = "Action: Triangular Gait", continuous = True):
+        if self.isMoving == False and continuous:
+            print("S->M")
+            self.startwalknew()
+        print('T DEG: ',degree,' DIS: ',distance)
+        dataCMD = json.dumps({'var':"TriangularWalk", 'val':degree, 'dis':distance})
+        self.ser.write(dataCMD.encode())
+        # not necessary to acknowledge when the dog is moving (in the while loop of startwalknew in the ESP32).
+        if self.isMoving == False:  
+            timeSend = time.time()
+            while True:
+                if self.ser.in_waiting > 0:
+                    ack = self.ser.readline().decode().strip()
+                    if ack == token:
+                        print("{} received.".format(ack))
+                        break
+                if time.time() - timeSend > wait:
+                    print("Timeout, resending...")
+                    self.ser.write(dataCMD.encode())
+                    timeSend = time.time()
+        if continuous: 
+            self.isMoving = True
+        # time.sleep(0.1)
+
+    def freeturn(self, degree, wait = 1.5, token = "ActionK: TURNING Once"):
+        if self.isMoving == True:
+            self.stopwalknew()
+        print('FT: ', degree)
+        dataCMD = json.dumps({'var':"freeturn", 'val':degree})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.isMoving = False
+        self.stopwalknew()
+        # time.sleep(0.1)
+
+    def stopwalknew(self, wait = 1.5, token = "FBStop"):
+        dataCMD = json.dumps({'var':"move", 'val':3})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.isMoving = False
+        # time.sleep(0.1)
+
+    def startwalknew(self, wait = 1.5, token = "Forward"):
+        dataCMD = json.dumps({'var':"move", 'val':1})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.isMoving = False
+        # time.sleep(0.1)
+
+    def changeclearance(self, val = 20, wait = 1.5, token = "WALK_LIFT"):
+        '''
+        val: 0~30.
+        '''
+        dataCMD = json.dumps({'var': "ChangeClearance", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
     def readGlobalStep(self):
         value_str = self.ser.readline().decode().strip()
         # print("value_str:", value_str)
@@ -645,6 +770,16 @@ class robot():
         else:
             self.globalStep = -1.0
             print("WARNING: received string \"{}\" is not globalStep".format(value_str))
+
+    def schedular(self):
+        '''
+        input: self.countCrossings, self.path
+        output: action to take.
+        '''
+        if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
+            self.countCrossing += 1
+
+        return self.path[self.countCrossing]
 
     def buzzer(self, val):
         '''
@@ -870,7 +1005,25 @@ class robot():
     def stopFB(self):
         dataCMD = json.dumps({'var':"move", 'val':3})
         self.ser.write(dataCMD.encode())
-        print('robot-stop')	
+        print('robot-stop')
+
+    def adjustHeight(self, height, dis = 1.0, token = "Adjusting Height", wait = 1.5): # TODO: fill the blanks.
+        dataCMD = json.dumps({'var': "UPDOWN", 'val': height, 'dis': dis}) # TODO: fill the blanks.
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        print("Adjusted height to {}.".format(height))
+        # change the walk clearance to default.
+        # self.changeclearance()
 
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
@@ -888,12 +1041,15 @@ class robot():
         Initialize the bottom camera with cv2 video capturer.
         Output: the state of the camera capture, True/False.
         '''
-        self.cap = cv2.VideoCapture(self.bottomCamSrc)  # the index of the source camera.
+        self.cap = cv2.VideoCapture("/dev/video"+str(self.bottomCamSrc))  # the index of the source camera.
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.bottomCamRes[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.bottomCamRes[1])
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))  # for the arducam config.
+        # self.cap.set(cv2.CAP_PROP_FPS, 100)  # for the arducam config.
+        print("Camera FPS is: {}".format(self.cap.get(cv2.CAP_PROP_FPS)))
         return self.cap.isOpened()
 
-    def _detectSmallDots(self, frame, minDist = 20, minRadius = 2, maxRadius = 12, verbose = False):
+    def _detectSmallDots(self, frame, minDist = 13, minRadius = 4, maxRadius = 8, verbose = False):
         '''
         Detect the smaller dot patterns.
         Output: the center coordinates of the patterns and the distance Matrix.
@@ -905,7 +1061,7 @@ class robot():
         gray_blurred = cv2.medianBlur(gray, 5)
 
         # Detect circles using HoughCircles
-        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=minDist, param1=50, param2=21, minRadius=minRadius, maxRadius=maxRadius)  # param1=50, param2=30
+        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=self.config['smallCirclesMinDistance'], param1=self.config['smallCirclesParam1'], param2=self.config['smallCirclesParam2'], minRadius=self.config['smallCirclesMinRadius'], maxRadius=self.config['smallCirclesMaxRadius'])  # param1=50, param2=30
 
         # Ensure at least one circle was found
         if circles is not None:
@@ -927,7 +1083,7 @@ class robot():
                 if verbose: print("disMtx: \n{}\n".format(disMtx))
                 return centers, disMtx
             else:
-                print("Only {} circle detected, unable to calculate mutual distance.".format(count))
+                if verbose: print("Only {} circle detected, unable to calculate mutual distance.".format(count))
                 return centers, None
             
         else:
@@ -1023,7 +1179,7 @@ class robot():
         
         '''
         Input: the cv2 captured frame (should be 120x160x3);
-        Output: a list containing the centroid and the mutual yaw matrix. None if no circle in the input frame.
+        Output: a list containing the centers and the mutual yaw matrix. None if no circle in the input frame.
         '''
 
         # Convert frame to grayscale
@@ -1035,7 +1191,7 @@ class robot():
         # Detect circles using HoughCircles
         # params can be tuned if necessary.
         # circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=10, param1=50, param2=21, minRadius=2, maxRadius=10)  # default: param1=50, param2=30
-        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=25, minRadius=4, maxRadius=20)
+        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=self.config['largeCirclesMinDistance'], param1=self.config['largeCirclesParam1'], param2=self.config['largeCirclesParam2'], minRadius=self.config['largeCirclesMinRadius'], maxRadius=self.config['largeCirclesMaxRadius'])
 
         # Ensure at least one circle was found
         if circles is not None:
@@ -1059,7 +1215,7 @@ class robot():
             
             centers = np.array(centers).reshape(-1, 2).astype('float')
             # find the Manhattan centroid.
-            centroid = self._getManhattanCentroid(centers)
+            # centroid = self._getManhattanCentroid(centers)
             # centroid = np.mean(centers, axis = 0)
 
             # init yaw storage.
@@ -1073,7 +1229,8 @@ class robot():
                 yy = y[:, np.newaxis]
                 dx = xx - x
                 dy = yy - y
-                yaw = np.arctan(np.divide(dy, dx).copy()) * 180 / np.pi
+                # yaw = np.arctan(np.divide(dy, dx).copy()) * 180 / np.pi
+                yaw = np.arctan(np.divide(dx, dy).copy()) * 180 / np.pi  # depending on the orientation of the camera.
                 if verbose: print("Mutual gradient of {} circles: \n{}".format(count, yaw))
                 # save to mat file.
                 if savetomat: savemat('zh_CircleOutput.mat', {"yaw": yaw})
@@ -1083,7 +1240,7 @@ class robot():
             if display:
                 # Display the processed frame
                 cv2.imshow('Detected Circles', frame)       
-            return [centroid, yaw]
+            return [centers, yaw]
         
         else:
             if verbose: print("No circle in this frame.")
@@ -1103,6 +1260,7 @@ class robot():
         '''
         lineYaw = np.array([])
         entryVisited = np.zeros((yaw.shape)).astype('bool')  # boolean matrix to register which entry has been visited.
+        entryDir = np.zeros((yaw.shape[0])).astype('bool')
         for row in range(yaw.shape[0]):
             for column in range(yaw.shape[1]):
                 if entryVisited[row][column] == False and entryVisited[column][row] == False:
@@ -1114,8 +1272,12 @@ class robot():
                             # if the registered group does not contain this yaw angle, 
                             # add this yaw to the registered group.
                             if groupLine.size == 0:  
+                                if np.abs(meanYaw) <= 45:  # mind the direction of the camera.
+                                    entryDir[idx] = True
                                 lineYaw = np.append(lineYaw, meanYaw)
                             else:
+                                if np.abs(meanYaw) <= 45:
+                                    entryDir[idx] = True
                                 # update the mean yaw if this line already exists in the registered group.
                                 lineYaw[groupLine] = (lineYaw[groupLine] + meanYaw) / 2  
                             # update the visited circles, including the symmetrical ones.
@@ -1134,12 +1296,40 @@ class robot():
                     if verbose: print("----------------------------------------------------------")
         # If more than 2 lines were clustered, this result should be dumped;
         # if 2 lines were clustered but they are not orthogonal, this result should also be dumped.
+        # print("lineYaw: {}".format(lineYaw))
         if lineYaw.size > 2: lineYaw = np.array([None])
-        elif lineYaw.size == 2 and np.abs(np.abs(lineYaw[0] - lineYaw[1]) - 90) > tolerance: lineYaw = np.array([None])
+        elif lineYaw.size == 2 and np.abs(np.abs(lineYaw[0] - lineYaw[1]) - 90) > tolerance: 
+            if verbose: print("lineYaw.size == 2")
+            lineYaw = np.array([None])
         elif lineYaw.size == 0: lineYaw = np.array([None])
-        return lineYaw
+        return lineYaw, entryDir
 
-    def getPoseFromCircles(self, minCircles = 3, verbose=False, display=False):
+
+    def _enqueue(self, item):
+        '''
+        General purpose function to pop-in new items to a FIFO queue. If the queue is full, the earliest item will be removed.
+        '''
+        self.atCrossingFIFO.append(item)
+        
+    def _viewQueue(queue):
+        '''
+        Check all the items in the queue, in a list.
+        '''
+        return list(queue)
+
+    def checkCrossing(self):
+        '''
+        Check whether there is a crossing based on the FIFO.
+        '''
+        listFIFO = list(self.atCrossingFIFO)
+        if sum(listFIFO) < len(listFIFO) // 2 + 2:
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = False
+        elif sum(listFIFO) >= len(listFIFO) // 2 + 2:
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = True
+
+    def getPoseFromCircles(self, minCircles = 5, verbose=False, display=False):
         '''
         To detect the circle patterns on the bricks for EACH FRAME.
         Input: config params (minCircles means the frame will be dumped if there are 
@@ -1157,19 +1347,44 @@ class robot():
 
         # process the large circle traces.
         if ret1 != None:
-            self.bottomLineCentroid = ret1[0] - np.array(self.bottomCamRes) / 2
-            self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[1], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
-            bottomLineYaw = self._computeYawFromMutualGradients(np.array(ret1[1]), minCircles=minCircles, verbose=verbose)
-            if bottomLineYaw.any() != None:  # only change the yaw when the detected yaw(s) is legitimate.
+            bottomLineYaw, self.entryDir = self._computeYawFromMutualGradients(np.array(ret1[1]), minCircles=minCircles, verbose=verbose)
+            # print("bottomLineYaw: {}".format(bottomLineYaw))
+            # compute the straight line manhattan centroid
+            if self.entryDir.any():
+                bottomLineCentroid = self._getManhattanCentroid(ret1[0][self.entryDir])
+                self.bottomLineCentroid = bottomLineCentroid - np.array(self.bottomCamRes) / 2
+                self.bottomLineCentroid = (self.bottomLineCentroid + bottomLineCentroid) / 2  # windowing.
+                self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
+            if bottomLineYaw.all() and self.entryDir.any():  # only change the yaw when the detected yaw(s) is legitimate.
                 self.bottomLineYaw = bottomLineYaw
-                self.lostVision = 0
-            else:
-                if self.bottomLineCentroid[1] <= 0:
-                    self.lostVision = -1
+                # determine if the robot detects a crossing.
+                if len(self.bottomLineYaw) == 2: 
+                    self._enqueue(True)
+                elif len(self.bottomLineYaw) == 1:
+                    if abs(self.bottomLineYaw) >= 55:
+                        self._enqueue(True)
+                    else:
+                        self._enqueue(False)
+                self.checkCrossing()
+                self.currentAction = self.schedular()
+                # check whether the traces are visible to the robot.
+                if np.abs(self.bottomLineCentroid[0]) < self.horizontalLimit:
+                    self.lostVision = 0
                 else:
+                    if self.bottomLineCentroid[0] <= 0:
+                        self.lostVision = -2
+                    else:
+                        self.lostVision = 2
+            else:
+                # print("bottomLineYaw: {}, self.entryDir: {}".format(bottomLineYaw, entryDir))
+                if self.bottomLineCentroid[0] < 0:
+                    self.lostVision = -1
+                elif self.bottomLineCentroid[0] > 0:
                     self.lostVision = 1
             if verbose: print("Manhattan Centroid: [{:.2f}, {:.2f}] | walkDir: {} | yaw(s): {}\n".format(self.bottomLineCentroid[0], self.bottomLineCentroid[1], self.walkDir, self.bottomLineYaw))
             # return [self.bottomLineCentroid, self.bottomLineYaw]
+        else:
+            print("ret1 is {}.".format(ret1))
 
         # process the small dot patterns.
         if retSmall != None:
@@ -1214,7 +1429,7 @@ class robot():
             transCamera[0] *= -1
             # Add the optional calibration function.
             if useCalibration:
-                transCamera = calibratePose2D(eulerCamera[1], transCamera)
+                transCamera = calibratePose2D(eulerCamera[1], transCamera)[1]
             rotCamera = rotY(- eulerCamera[2]).dot(rotX(- eulerCamera[1])).dot(rotZ(eulerCamera[0]))  # convert to standard zxy rotmat.
             hmCamera = np.zeros((4, 4)).astype('float')
             hmCamera[:3, :3] = rotCamera
