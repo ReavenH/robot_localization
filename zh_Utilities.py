@@ -481,6 +481,7 @@ class robot():
         # store the previous bottom camera poses.
         self.bottomLineCentroid = [0.0, 0.0]
         self.bottomLineYaw = np.array([0.0])
+        self.bottomLineYawStraight = 0.0  # it only stores the yaw along the forward direction.
         self.walkDir = 0.0  # in degs.
         self.denoConst = self.bottomCamRes[0] / (1 * np.sin(2 / 180 * np.pi))
         self.previousCircles = 0
@@ -510,6 +511,10 @@ class robot():
         # the first will always be F.
         self.path = "FFFFFFFFFFFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
         self.currentAction = "S"
+
+        # the right leg bias param.
+        self.rlb = 0.0
+        self.rlbPIDParams = np.array([0.0, 0.0, 0.0])  # the P, I, D parameter for the RLB PID Controller.
 
         print("Robot Class initialized!")
         
@@ -781,6 +786,16 @@ class robot():
 
         return self.path[self.countCrossing]
 
+    def rlbPID(self):
+        '''
+        input: 
+            self.bottomLineYawStraight (the yaw along the forward direction, negative if the dog tilts to the left);
+            self.rlbPIDParams (the Kp, Ki, Kd for the controller).
+        output: self.RLB (float, the rlb value to the ESP32).
+        return: NO RETURN VALUE.
+        '''
+        pass
+        
     def buzzer(self, val):
         '''
         val: True (On) or False (Off)
@@ -1356,16 +1371,27 @@ class robot():
                 self.bottomLineCentroid = (self.bottomLineCentroid + bottomLineCentroid) / 2  # windowing.
                 self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
             if bottomLineYaw.all() and self.entryDir.any():  # only change the yaw when the detected yaw(s) is legitimate.
+                # self.bottomLineYaw = bottomLineYaw
+                bottomLineYaw *= -1  # the actual direction
                 self.bottomLineYaw = bottomLineYaw
                 # determine if the robot detects a crossing.
                 if len(self.bottomLineYaw) == 2: 
                     self._enqueue(True)
+                    bottomLineYaw = bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
+                    bottomLineYaw = np.sign(bottomLineYaw) * np.abs(bottomLineYaw)
+                    self.bottomLineYawStraight = bottomLineYaw
                 elif len(self.bottomLineYaw) == 1:
                     if abs(self.bottomLineYaw) >= 55:
+                        # a vertical line detected.
                         self._enqueue(True)
                     else:
                         self._enqueue(False)
+                # prevent datatype errors.
+                if isinstance(bottomLineYaw, (int, float)) != True:
+                        bottomLineYaw = bottomLineYaw[0]
+                # check if there is a crossing, with a time window.
                 self.checkCrossing()
+                # determine the current action to take.
                 self.currentAction = self.schedular()
                 # check whether the traces are visible to the robot.
                 if np.abs(self.bottomLineCentroid[0]) < self.horizontalLimit:

@@ -68,6 +68,7 @@ while myRobot.cap.isOpened:
             if myRobot.lostVision in [0, 2, -2]:
                 yaw = - myRobot.bottomLineYaw
 
+                '''
                 # process yaw to output a correct datatype.
                 if len(yaw) == 2:
                     yaw = yaw[np.argmin(np.abs(yaw))]
@@ -75,7 +76,8 @@ while myRobot.cap.isOpened:
 
                 if isinstance(yaw, (int, float)) != True:
                     yaw = yaw[0]
-
+                '''
+                
                 print("centroid: [{:.2f}, {:.2f}] | atCrossing: {} |yaw(s): {}".format(myRobot.bottomLineCentroid[0], myRobot.bottomLineCentroid[1], myRobot.atCrossing, yaw))
 
                 isturn = False
