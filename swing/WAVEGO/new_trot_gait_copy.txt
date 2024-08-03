@@ -1,0 +1,92 @@
+这是原本的trot gait，没有pid controller，需要手动调参
+
+	
+//YAO, 4/24/2024, new TROT gait control using newsinglegait()
+void newTrotGait(float GlobalInput, float directionAngle, int turnCmd){
+  float StepA;
+  float StepB;
+  float StepC;
+  float StepD;
+  float Tpitch, Troll;
+  ////////////////////////////////////////////calculate gesture sequence/////////////////////////
+
+  //the term is A = B -> C = D -> A
+  StepA = GlobalInput;
+  StepB = GlobalInput;
+  StepC = GlobalInput - 0.5 + 1;
+  StepD = GlobalInput - 0.5 + 1;
+
+  if(StepA>1){StepA--;}
+  if(StepB>1){StepB--;}
+  if(StepC>1){StepC--;}
+  if(StepD>1){StepD--;}
+
+  pr_update();
+
+  
+  // /////// calculate mean pitch ////////////////
+  // Queue.enqueue(pitch);
+  // if(Queue.itemCount() > 20){pitchSum -= Queue.dequeue();}
+  // pitchSum += pitch;
+  // float meanpitch = pitchSum / Queue.itemCount();
+  // Serial.println(meanpitch);
+  
+
+  Serial.print(pitch);
+  Serial.print(' ');
+  Serial.println(roll);
+
+  
+  double target_x=0.0;
+
+  //roll pitch yaw
+  // DOG 1
+  double bias_x = 1.73;  //默认设置7.5
+  double bias_z = 2;  //默认设置4
+  // PosIMU[0] = -0.3*M_PI/180;
+  // PosIMU[1] = 0.97*M_PI/180;
+
+  PosIMU[0] = 0*M_PI/180;
+  PosIMU[1] = 0*M_PI/180;
+
+
+  PosIMU[2] = adjust_yaw*M_PI/180;
+
+  //DOG 2
+  // double bias_x = 7.5;
+  // double bias_z = 0;
+  // PosIMU[0] = 2.5*M_PI/180;
+  // PosIMU[1] = 0;
+  // PosIMU[2] = adjust_yaw*M_PI/180;
+
+
+
+  // // PosIMU[1] = 30*M_PI/180;
+  // PosIMU[2] = target_yaw;
+
+
+  // if(meanpitch<-5){isdown = false;}
+  // if(meanpitch>5){isdown = true;}
+
+  // if(isdown){PosIMU[1] = max(PosIMU[1]-0.5*M_PI/180,-8.5*M_PI/180);}
+  // if(!isdown){PosIMU[1] = min(PosIMU[1]+0.5*M_PI/180,0.0);}
+
+  // test IMU control
+  // print(mean imu)
+
+
+
+    //O-OA
+  PosCom[0][0] = target_x + bias_x;
+  PosCom[1][0] = bias_z;
+  PosCom[2][0] = WALK_HEIGHT;
+  //this step is necessary
+  makeArrayNegative(PosCom);
+  
+  // if turnCmd = 1, do crab walk
+  newsinglegait(4, StepA, -directionAngle, PosIMU, PosCom, turnCmd);
+  newsinglegait(1, StepB, directionAngle, PosIMU, PosCom, turnCmd);
+  newsinglegait(2, StepC, directionAngle, PosIMU, PosCom, turnCmd);
+  newsinglegait(3, StepD, -directionAngle, PosIMU, PosCom, turnCmd);
+
+}

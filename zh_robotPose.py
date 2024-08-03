@@ -1,246 +1,153 @@
+#!/usr/bin/env python3
+
+import os
+os.path.join('/home/pi/.local/lib/python3.11/site-packages')
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+# from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
+import threading
+import time
+import calibrationfunc as cf
+import final_localization as fl
+from hp_LineTracking import LineTracking
+from zh_Utilities import robot, hmRPYG, ser, UDPSender, trajectory, poseTags, checkTurning, boardBiasesYaw
 
+# ---- Create a figure object ----
+fig0 = plt.figure(0)
+ax_fig0 = fig0.add_subplot(111, projection='3d')
+ax_fig0.set_xlabel('X')
+ax_fig0.set_ylabel('Y')
+ax_fig0.set_zlabel('Z')
 
-# define the ground coordinates:
-# X: pointing forwards; Y: pointing left; Z: pointing upwards
-# each column: x, y, z point coords,
-groundCoords = np.array([[1.0, 0.0, 0.0],
-                         [0.0, 1.0, 0.0],
-                         [0.0, 0.0, 1.0]])
+ax_fig0.set_xlim([-0.5, 1.0])
+ax_fig0.set_ylim([-0.75, 0.75])
+ax_fig0.set_zlim([0, 1.5])
 
+# ---- Instantiate the robot class ----
+myRobot = robot(hmRPYG, ax_fig0, poseTags)
+poseRecord = np.zeros((1, 6))
 
-def rotX(phi):
-    '''
-    rotation matrix around the X axis (roll)
-    np.cos, np.sin uses rads as input
-    '''
-    phi = np.deg2rad(phi)
-    rotation_matrix_X = np.array([[1.0, 0.0, 0.0],
-                                  [0.0, np.cos(phi), - np.sin(phi)],
-                                  [0.0, np.sin(phi), np.cos(phi)]])
-    return rotation_matrix_X
+# data sender init.
+PC_IP = "10.50.9.237"  # should be updated DAILY!!!
+PC_Port = 52000
+poseSender = UDPSender(PC_IP, PC_Port)
 
+# store the previous pose (control sending speed)
+previousPose = np.zeros(6).astype('float')
 
-def rotY(theta):
-    '''
-    rotation matrix around the Y axis (pitch)
-    '''
-    theta = np.deg2rad(theta)
-    rotation_matrix_Y = np.array([[np.cos(theta), 0.0, np.sin(theta)],
-                                  [0.0, 1.0, 0.0],
-                                  [-np.sin(theta), 0.0, np.cos(theta)]])
-    return rotation_matrix_Y
-
-
-def rotZ(psi):
-    '''
-    rotation matrix around the Z axis (yaw)
-    '''
-    psi = np.deg2rad(psi)
-    rotation_matrix_Z = np.array([[np.cos(psi), -np.sin(psi), 0.0],
-                                  [np.sin(psi), np.cos(psi), 0.0],
-                                  [0.0, 0.0, 1.0]])
-    return rotation_matrix_Z
-
-
-def hmRPYG(roll, pitch, yaw, trans):
-    '''
-    Generates a homogeneous matrix based on the rotation from the ground frame.
-    returns a 4x4 homogeneous matrix of the RPY order.
-    trans should be a vector of 3 entries.
-    '''
-
-    hmRPY = np.zeros((4, 4)).astype('float')  # init a 4x4 homogeneous matrix
-    rotRPY = rotZ(yaw).dot(rotY(pitch)).dot(rotX(roll))
-    hmRPY[:3, :3] = rotRPY
-    hmRPY[:3, -1] = trans.flatten()
-    hmRPY[-1, -1] = 1.0
-    return hmRPY
-
-
-def hmRPYP(roll, pitch, yaw, trans):
-    '''
-    Generates a homogeneous matrix based on the rotation from the previous intermediate frame.
-    returns a 4x4 homogeneous matrix of the RPY order.
-    trans should be a vector of 3 entries.
-    '''
-    hmRPY = np.zeros((4, 4)).astype('float')  # init a 4x4 homogeneous matrix
-    rotRPY = rotX(roll).dot(rotY(pitch)).dot(rotZ(yaw))  # the rotation matrix based on the intermediate frame.
-    hmRPY[:3, :3] = rotRPY
-    hmRPY[:3, -1] = trans.flatten()
-    hmRPY[-1, -1] = 1.0
-    return hmRPY
-
-
-def drawGround(pose, ax, label):
-    '''
-    draw the 3D pose with respect to the ground coordinates
-    input: pose is the 4x4 array
-    rotation order: RPY, with respect to the ground coords
-    '''
-
-    if(pose.shape != (4, 4)):
-        print("Wrong pose shape, exited")
-        return
-
-    newOrigin = pose[:-1, -1]  # the translation vector of pose, 3x1
-    groundUnivVecs = np.vstack((groundCoords * 0.05, np.ones((1, 3))))  # 4x3, padding
-    newUnitVecs = np.dot(pose, groundUnivVecs)[:-1, :]  # 4x3 -> 3x3
-    newCoordX = np.vstack((newOrigin, newUnitVecs[:, 0])).T  # 3x2
-    newCoordY = np.vstack((newOrigin, newUnitVecs[:, 1])).T
-    newCoordZ = np.vstack((newOrigin, newUnitVecs[:, 2])).T
-
-    # draw the 3 unit vectors
-    plt.ion()
-    ax.plot(newCoordX[0, :], newCoordX[1, :], newCoordX[2, :], color = 'r', label="X")
-    ax.plot(newCoordY[0, :], newCoordY[1, :], newCoordY[2, :], color = 'g', label="Y")
-    ax.plot(newCoordZ[0, :], newCoordZ[1, :], newCoordZ[2, :], color = 'b', label="Z")
-
-    # text
-    ax.text(newOrigin[0], newOrigin[1], newOrigin[2] - 0.03, label, color = 'black')
-    plt.show()
-    plt.pause(0.02)
-
-
-def drawRigidBody(vertices):
-    # vertices is the 8 vertices of the robot rigid body.
-    links = [[0, 1], [1, 2], [2, 3], [3, 0],
-            [4, 5], [5, 6], [6, 7], [7, 4],
-            [0, 4], [1, 5], [2, 6], [3, 7]]
-    vertices = vertices[:3, :].T  # should be 8x3 if the rigid body is a rectangular prism.
-    for link in links:
-        ax_fig0.plot3D(*zip(*vertices[link]), color="k", linewidth = 0.3)
-
-
-class robot():
-    def __init__(self, hm, ax): # hm is the 4x4 homogeneous matrix, for different rotation orders.
-        self.body_length = 0.20  # cm
-        self.body_width = 0.10  # cm
-        self.body_thickness = 0.03  # cm
-        # the centroid of the robot, also the origin of the rigid body frame.
-        # Can be adjusted to comply with the actual turning center.
-        self.center = np.array([0.0, 0.0, 0.0])
-        # to store the vertices of the robot body as a rectangular prism.
-        # the first column is the coordinates of the left-front corner of the rigid body,
-        # starting from left-front, clockwise; from upper to bottom surface.
-        # Under the rigid body frame. Size is 4x8.
-        self.body_vertices = np.array([[0.5 * self.body_length - self.center[0], 0.5 * self.body_length - self.center[0], - 0.5 * self.body_length - self.center[0], - 0.5 * self.body_length - self.center[0],
-                                        0.5 * self.body_length - self.center[0], 0.5 * self.body_length - self.center[0], - 0.5 * self.body_length - self.center[0], - 0.5 * self.body_length - self.center[0]],  # x coordinate
-                                       [0.5 * self.body_width - self.center[1], - 0.5 * self.body_width - self.center[1], - 0.5 * self.body_width - self.center[1], 0.5 * self.body_width - self.center[1],
-                                        0.5 * self.body_width - self.center[1], - 0.5 * self.body_width - self.center[1], - 0.5 * self.body_width - self.center[1], 0.5 * self.body_width - self.center[1]],  # y coordinate
-                                       [0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2], 0.5 * self.body_thickness - self.center[2],
-                                        - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2], - 0.5 * self.body_thickness - self.center[2]],  # z coordinate
-                                       [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])   # padding for computation.
-        self.body_verticesGround = self.body_vertices  # in the ground frame.
-        self.measurement = np.zeros((4, 4)).astype('float')  # init the measurement of each update step.
-        self.control = np.zeros(2).astype('float')  # init the 2D control input: translation along the X+ axis, delta-yaw.
-        self.odometry = np.zeros(2).astype('float') # init the 2D odometry based on IMU.
-        self.hm = hm  # pass the homogeneous matrix calculation func.
-        self.initialEstimate = np.zeros(6).astype('float')  # init the initail estimate of pose: roll, pitch, yaw, x, y, z.
-        self.updatedEstimate = np.zeros(6).astype('float')
-        self.ax = ax  # the plot axis.
-
-    def poseUpdate(self):
-        # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
-        self.updatedEstimate = self.initialEstimate
-
-        # draw the pose of the center of robot.
-        drawGround(self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]), self.ax, "Dog")
-        # update the rigid body vertices.
-        self.body_verticesGround = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(self.body_vertices)
-        drawRigidBody(self.body_verticesGround)
-
-    def perceptionUpdate(self, odo, mea):
-        # TODO: transform the visual measurement from camera frame to the rigid body frame.
-        self.odometry = odo
-        self.measurement = mea
-
-    def controlUpdate(self, ctrl):
-        self.control = ctrl
-        # update the init guess of pose (ground truth).
-        # consider move the Gaussian noise here (forward noise).
-        translation = np.array([[self.control[0], 0.0, 0.0, 1]]).T  # in the rigid body frame
-        self.initialEstimate[3:] = self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:]).dot(translation).flatten()[:-1]  # x, y, z in the world frame.
-        self.initialEstimate[2] = self.updatedEstimate[2] + self.control[1]  # only change yaw.
-
-
-class landmarks():
-    def __init__(self, hm, poses, ax):
-        '''
-        Init the ground truth locations of the Apriltags.
-        TODO: How to specify the initial location when the robot class is instanciated? Relative position.
-        '''
-        self.hm = hm  # specify the type of homegeneous matrix.
-        self.poses = poses  # poses corresponding to the homogeneous matrix. Shape: nx7, 7 = tagID + 6 poses, n = No. of tags.
-        self.ax = ax  # drawing axis.
-
-
-class brickMap():
-    def __init__(self, hm, ax) -> None:
-        '''
-        Init the class to store brick model and update the brick map.
-        '''
-        self.hm = hm
-        self.ax = ax
-        self.brickLength = 0.40 # meter
-        self.brickWidth = 0.20
-        self.brickThickness = 0.015
-        self.brickVertices = np.array([[0.5 * self.brickLength, 0.5 * self.brickLength, - 0.5 * self.brickLength, - 0.5 * self.brickLength, 
-                                        0.5 * self.brickLength, 0.5 * self.brickLength, - 0.5 * self.brickLength, - 0.5 * self.brickLength],
-                                       [0.5 * self.brickWidth, - 0.5 * self.brickWidth, 0.5 * self.brickWidth, - 0.5 * self.brickWidth, 
-                                        0.5 * self.brickWidth, - 0.5 * self.brickWidth, 0.5 * self.brickWidth, - 0.5 * self.brickWidth],
-                                       [0.5 * self.brickThickness, 0.5 * self.brickThickness, 0.5 * self.brickThickness, 0.5 * self.brickThickness, 
-                                        - 0.5 * self.brickThickness, - 0.5 * self.brickThickness, - 0.5 * self.brickThickness, - 0.5 * self.brickThickness],
-                                       [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]])  # padding for computation.
-        self.map = np.zeros(6).astype('float')  # to store the poses of the bricks as maps.
-
-    def place(self, pose):
-        # TODO: detect collision and layer.
-        pass
-
+walkThreadRunning = False
 
 if __name__ == "__main__":
-    # ---- Create a figure object ----
-    fig0 = plt.figure(0)
-    ax_fig0 = fig0.add_subplot(111, projection='3d')
-    ax_fig0.set_xlabel('X')
-    ax_fig0.set_ylabel('Y')
-    ax_fig0.set_zlabel('Z')
-    
-    ax_fig0.set_xlim([-0.5, 1.0])
-    ax_fig0.set_ylim([-0.75, 0.75])
-    ax_fig0.set_zlim([0, 1.5])
-    
-    # ---- Initialize the tags as an object ----
-    poseTags = np.array([[13, 90, -90, 0, 0.75, 0.20, 0.13],
-                         [14, 90, -90, 0, 0.75, -0.20, 0.13],
-                         [15, 90, -90, 0, 0.75, -0.40, 0.13],
-                         [16, 90, -90, 0, 0.75, 0.40, 0.13]])
-    myTags = landmarks(hmRPYP, poseTags, ax_fig0)
 
-    for _, pose in enumerate(myTags.poses):
-            drawGround(myTags.hm(*pose[1:4], pose[4:]), myTags.ax, "Tag "+str(int(pose[0])))
+    # import detection module. If this is not within MAIN, this script will not be able to be imported.
+    import apriltag_video_picamera4 as avp
+    # ---- initiate a apriltag detetcion threading func ----
+    def apriltagDetectionThreadFunc():
+        avp.apriltag_video(print_log = False, cameraMatrix = cf.cameraMatrix, distCoeffs = cf.distCoeffs, display_stream=False, output_stream = False)
 
-    # ---- Define a pseudo control input series ----
+    # ---- Apriltag measurement update ----
+    apriltagDetectionThread = threading.Thread(target=apriltagDetectionThreadFunc)
+    apriltagDetectionThread.start()
+    time.sleep(1)
+
+    # ---- Odometry readings from serial ---- 
+    # define a serial read function that returns dyaw and dx.
+    # to be wrapped in a thread.
     '''
-    controls = np.array([[0.4, 0.4, 0.4, 0.4],
-                         [90, 90, 90, 90]])
+    odometryReadIsRunning = True  # thread control flag.
+    def odometryRead():
+        while odometryReadIsRunning:
+            myRobot.odometryUpdate(*readIMU())
+    odometryReadThread = threading.Thread(target=odometryRead)
+    odometryReadThread.start()
     '''
-    controls = np.array([[0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
-                         [10, -10, -5, -5, 2, -2, 6, -6, 7]])
-    
-    controls[0] = controls[0] + np.random.normal(0, 0.02, 9)
-    controls[1] = controls[1] + np.random.normal(0, 1, 9)
 
-    # ---- Instantiate the robot class ----
-    myRobot = robot(hmRPYG, ax_fig0)
-    poseRecord = np.zeros((1, 6))
-    for i, ctrl in enumerate(controls.T):
-        myRobot.controlUpdate(ctrl)
-        myRobot.poseUpdate()
-        np.vstack((poseRecord, myRobot.updatedEstimate))
+    # ---- Initialize the LineTracking Class ----
+    lineTracking = LineTracking()
+
+    try:  
+        # myRobot.forward()
+
+        while(1):
+            # ---- Update Odometry ----
+            # myRobot.odometryUpdate(*readIMU())
+
+            # ---- Line Recognition ----
+            
+            frameRead = avp.frameGlobal.copy()
+            yOffsetLine = lineTracking.run(frameRead.copy())  # horizontal offset from the center line.
+            # print("Time: {} \t yOffsetLine: {} \t No. Frame: {} \t Shape: {} \t Var of Frame: {} \t Type: {} \t".format(time.time(), yOffsetLine, avp.frameCountGlobal, avp.frameGlobal.shape, np.var(avp.frameGlobal[:, :, ::-1]), frameRead.dtype))
+            # print("yOffsetLine: {}".format(yOffsetLine))
+            
+            # plt.imsave("./TESTIMGS/IMG"+str(avp.frameCountGlobal)+".png", avp.frameGlobal[:, :, ::-1])
+            # plt.imshow(avp.frameGlobal[:, :, ::-1])
+           
+            if avp.resultsGlobal != []:
+
+                # ---- Update Measurement ----
+                # TODO: only update measurement when the avp.resultsGlobal is different from the previous one.
+
+                myRobot.measurementUpdate(avp.resultsGlobal)
+
+                if not np.all(myRobot.measurement.copy() == previousPose.copy()):  
+                    # ---- Print Debug Info ----
+                    # drawGround(hmRPYG(*myRobot.measurement[:3], myRobot.measurement[3:]), ax_fig0, "")
+                    # print("Measurement at {} : {}".format(time.time(), myRobot.measurement))
+
+                    # ---- Send Data via WiFi ----
+                    poseSender.send(np.append(time.time(), myRobot.measurement.copy()))  # send the pose array.
+
+                    # ---- Calculate Params for Walking ---- 
+                    previousPose = myRobot.measurement.copy()  # store the previous pose.
+                    yawInTag, targetVector = checkTurning(myRobot.trajectoryNo, myRobot.measurement, trajectory)
+                    targetVector *= 100  # transform to cm
+
+                    # ---- Pass Params to final_localization.py ----
+                    yawInTag += boardBiasesYaw[myRobot.trajectoryNo]
+                    turningPose = np.append(yawInTag, targetVector.flatten())
+                    turningPose[-1] = yOffsetLine  # use line detection offset
+                    # print(turningPose)
+                    fl.robotPose = turningPose  # pass the pose to the thread.
+                    # print(yawInTag, targetVector)
+                    # np.savetxt('robotPose.csv', turningPose, delimiter=',')
+                    # print(turningPose)
+                    time.sleep(0.1)
+                    
+                    if not walkThreadRunning:
+                        # from Yao's code.
+                        # fl.reset()
+                        
+                        fl.walkThread.start()
+                        print('walk Thread start')
+                        time.sleep(2)
+                        walkThreadRunning = True
+                    
+            time.sleep(0.1)
+
+
+    except KeyboardInterrupt:
         
-input("Press any key to close the figure...")
-plt.close()
+        # myRobot.stopFB()
+
+        # ---- Kill the Apriltag threads. ----
+        avp.aptIsRunning = False
+        apriltagDetectionThread.join()
+
+        # ---- Kill the odometry update threads. ---- 
+        # odometryReadIsRunning = False
+        # odometryReadThread.join()
+
+        # ---- control the walking thread ----
+        
+        walkThreadRunning = False
+        fl.walkThread.join()
+        fl.iswalk=0
+        print('STOOOOOOOOOOOOOOOOOOOOOP')
+        
+
+        # ---- Close the WiFi data sender ----
+        poseSender.close()
+        
+        print("exited main")
+        plt.close()
+        ser.close()
