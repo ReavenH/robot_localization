@@ -515,6 +515,7 @@ class robot():
         # the right leg bias param.
         self.rlb = 0.0
         self.rlbPIDParams = np.array([0.0, 0.0, 0.0])  # the P, I, D parameter for the RLB PID Controller.
+        self.previous_error = 0.0
 
         print("Robot Class initialized!")
         
@@ -796,7 +797,6 @@ class robot():
         '''
         my_yaw = self.bottomLineYawStraight
         Kp,Ki,Kd = self.rlbPIDParams
-        previous_error = 0.0
         integral = 0.0
         setpoint = 0.0 
 
@@ -811,14 +811,14 @@ class robot():
         I_out = Ki * integral
 
         # Derivative term
-        derivative = error - previous_error
+        derivative = error - self.previous_error
         D_out = Kd * derivative
 
         # PID output
         self.RLB = max(-0.2,min(P_out + I_out + D_out,0.2))
 
         # Update previous error
-        previous_error = error
+        self.previous_error = error
 
         return self.RLB
         
@@ -1344,7 +1344,6 @@ class robot():
             lineYaw = np.array([None])
         elif lineYaw.size == 0: lineYaw = np.array([None])
         return lineYaw, entryDir
-
 
     def _enqueue(self, item):
         '''
