@@ -5,7 +5,7 @@ import time
 
 # GPIO INIT
 pi = pigpio.pi()
-
+current_servo = -1
 min_pulsewidth = 500 
 max_pulsewidth = 2500  
 
@@ -59,6 +59,53 @@ def placeBrick():
     # linkages up.
     singleServoCtrl(0, 500, 10)
 
+def placeBrick2():
+    singleServoCtrl(0, 900, 1/20)
+    time.sleep(1)
+    singleServoCtrl(2, 2500, 1/2)
+    time.sleep(1)
+    singleServoCtrl(2, 1350, 1/2)
+    time.sleep(1)
+    singleServoCtrl(1, 775, 1/10)
+    time.sleep(1)
+    
+	
+    # linkage down.
+    singleServoCtrl(0, 1400, 1/20)
+    time.sleep(1)
+    singleServoCtrl(0, 1800, 1/10)
+    time.sleep(1)
+    
+    # align brick.
+    singleServoCtrl(1, 900, 1/50)  # rotate brick board to vertical.
+    time.sleep(1)
+    singleServoCtrl(2, 1450, 1/2)  # gripper open
+    time.sleep(1)
+    singleServoCtrl(2, 1350, 1/2)  # gripper fasten
+    time.sleep(1)
+
+    # rotate brick.
+    singleServoCtrl(1, 1900, 1/50)  # changed
+    time.sleep(1)
+
+
+    # release brick.
+    singleServoCtrl(2, 1800, 1/2)
+    time.sleep(2)
+    singleServoCtrl(0, 1400, 1/20)
+    time.sleep(1)
+    
+    # rotate brickboard.
+    singleServoCtrl(1, 775, 1/50)
+    time.sleep(1)
+
+    # fasten gripper.
+    singleServoCtrl(2, 500, 1/2)
+    time.sleep(1)
+
+    # linkages up.
+    singleServoCtrl(0, 700, 1/20)
+
 def resetPose():
     singleServoCtrl(0, 500, 1/2)
     singleServoCtrl(1, 500, 1/2)
@@ -80,17 +127,23 @@ try:
     waitKey = True
 
     while(True):
-        numIn = input("Input a value: servo No. or PWM\n")
-        if numIn <=3 and numIn >=1:
-            desiredServo = numIn
-            desiredPWM = int(input("Input desired PWM for Servo {}\n".format(desiredServo)))
-            desiredServo = int(input("Input servo No (0=baseBoard, 1=brickBoard, 2=gripperGear)\n"))
-            
-            if desiredServo == 0:
-                speed = 1/2
-            else:
-                speed = 1/10
-        singleServoCtrl(desiredServo, desiredPWM, speed)
+        #desiredServo = int(input("Input servo No (0=baseBoard, 1=brickBoard, 2=gripperGear)\n"))
+        #desiredPWM = int(input("Input desired PWM for Servo {}\n".format(desiredServo)))
+        input_number = int(input("Input the PWM you want\n"))
+        if input_number == 255:
+            placeBrick2()
+            continue
+			
+        if input_number < 10:
+            current_servo =  input_number
+            continue
+        else:
+            desiredPWM = input_number
+        if current_servo == 0:
+            speed = 1/2
+        else:
+            speed = 1/10
+        singleServoCtrl(current_servo, desiredPWM, speed)
     
 
 except KeyboardInterrupt:

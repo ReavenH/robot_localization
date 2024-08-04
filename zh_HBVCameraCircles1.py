@@ -20,8 +20,8 @@ while myRobot.cap.isOpened:
         centroid = poseBtmCam[0]
         yaw = poseBtmCam[1]
         '''
-        myRobot.getPoseFromCircles(minCircles=3, display=False, verbose=False)
-        print("MC: [{:.2f}, {:.2f}] | walkDir: {} | yaw(s): {}\n".format(myRobot.bottomLineCentroid[0], myRobot.bottomLineCentroid[1], myRobot.walkDir, myRobot.bottomLineYaw))
+        myRobot.getPoseFromCircles(minCircles=5, display=False, verbose=False)
+        print("MC: [{:.2f}, {:.2f}] | walkDir: {} | yaw(s): {} | lost vision: {} | entryDir: {}\n".format(myRobot.bottomLineCentroid[0], myRobot.bottomLineCentroid[1], myRobot.walkDir, myRobot.bottomLineYaw, myRobot.lostVision, myRobot.entryDir))
         print("Prev Dots: {}, Next Dots: {}\n".format(myRobot.previousCircles, myRobot.nextCircles))
         print("------------------------------------------------------------------------------")
         time.sleep(0.1)
