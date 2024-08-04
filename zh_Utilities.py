@@ -515,6 +515,7 @@ class robot():
         # the right leg bias param.
         self.rlb = 0.0
         self.rlbPIDParams = np.array([0.0, 0.0, 0.0])  # the P, I, D parameter for the RLB PID Controller.
+        self.previous_error = 0.0
 
         print("Robot Class initialized!")
         
@@ -794,7 +795,32 @@ class robot():
         output: self.RLB (float, the rlb value to the ESP32).
         return: NO RETURN VALUE.
         '''
-        pass
+        my_yaw = self.bottomLineYawStraight
+        Kp,Ki,Kd = self.rlbPIDParams
+        integral = 0.0
+        setpoint = 0.0 
+
+        # Calculate the error
+        error = setpoint - my_yaw
+
+        # Proportional term
+        P_out = Kp * error
+
+        # Integral term
+        integral += error
+        I_out = Ki * integral
+
+        # Derivative term
+        derivative = error - self.previous_error
+        D_out = Kd * derivative
+
+        # PID output
+        self.RLB = max(-0.2,min(P_out + I_out + D_out,0.2))
+
+        # Update previous error
+        self.previous_error = error
+
+        return self.RLB
         
     def buzzer(self, val):
         '''
@@ -1318,7 +1344,6 @@ class robot():
             lineYaw = np.array([None])
         elif lineYaw.size == 0: lineYaw = np.array([None])
         return lineYaw, entryDir
-
 
     def _enqueue(self, item):
         '''
