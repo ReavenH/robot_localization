@@ -499,7 +499,8 @@ class robot():
         # whether the robot is at a crossing.
         self.atCrossing = False  # True means detects a crossing.
         self.prevCrossing = False  # whether the robot was at a crossing at the previous time step.
-        self.atCrossingFIFO = deque([False]*35, maxlen=35)  # a FIFO window to decide whether the robot is at a crossing based on the proportion. Default length is 17.
+        self.lenFIFO = 25
+        self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)  # a FIFO window to decide whether the robot is at a crossing based on the proportion. Default length is 17. Length 35 also works.
         self.countCrossing = 0  # to count the number of the crossings that have passed.
 
         # the motionController's params.
@@ -509,8 +510,10 @@ class robot():
         
         # the movement schedular's params.
         # the first will always be F.
-        self.path = "FFFFFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
-        # self.path = "FS"
+        # self.path = "FFFFLFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
+        # self.path = "FFLFFFLFS"
+        self.path = "FFFFFLFFFLFFFFFLFFFS"
+        # self.path = "FFS"
         self.currentAction = "F"
 
         # the right leg bias param.
@@ -767,6 +770,27 @@ class robot():
                 self.ser.write(dataCMD.encode())
                 timeSend = time.time()
 
+    def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
+        '''
+        This function will stop the robot immediately, the global step will stop to send.
+        No startwalknew() is needed for the next movement.
+        '''
+        dataCMD = json.dumps({'var': "Interruptwalk"})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.stopwalknew()
+        self.isMoving = False
+
     def readGlobalStep(self):
         value_str = self.ser.readline().decode().strip()
         # print("value_str:", value_str)
@@ -782,7 +806,8 @@ class robot():
         input: self.countCrossings, self.path
         output: action to take.
         '''
-        if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
+        # if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
+        if self.atCrossing and (self.prevCrossing == False):
             self.countCrossing += 1
 
         return self.path[self.countCrossing]
@@ -1333,17 +1358,35 @@ class robot():
         '''
         return list(queue)
 
-    def checkCrossing(self):
+    def checkCrossing(self, numTrue = 5):
         '''
         Check whether there is a crossing based on the FIFO.
         '''
         listFIFO = list(self.atCrossingFIFO)
+        print("sum FIFO: {}".format(np.sum(listFIFO)))
+        if all(listFIFO[-numTrue:]) and (not any(listFIFO[:-numTrue])): # detect the rising edge.
+            print("1")
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = True
+            print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
+        else:
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = False
+        '''
+        elif all(listFIFO[:numTrue]) and (not any(listFIFO[numTrue:])):
+            print("2")
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = False
+        '''
+
+        '''
         if sum(listFIFO) < len(listFIFO) // 2:
             self.prevCrossing = self.atCrossing
             self.atCrossing = False
         elif sum(listFIFO) >= len(listFIFO) // 2:
             self.prevCrossing = self.atCrossing
             self.atCrossing = True
+        '''
 
     def getPoseFromCircles(self, minCircles = 5, verbose=False, display=False):
         '''
