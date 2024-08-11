@@ -499,7 +499,8 @@ class robot():
         # whether the robot is at a crossing.
         self.atCrossing = False  # True means detects a crossing.
         self.prevCrossing = False  # whether the robot was at a crossing at the previous time step.
-        self.atCrossingFIFO = deque([False]*17, maxlen=17)  # a FIFO window to decide whether the robot is at a crossing based on the proportion.
+        self.lenFIFO = 25
+        self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)  # a FIFO window to decide whether the robot is at a crossing based on the proportion. Default length is 17. Length 35 also works.
         self.countCrossing = 0  # to count the number of the crossings that have passed.
 
         # the motionController's params.
@@ -509,8 +510,11 @@ class robot():
         
         # the movement schedular's params.
         # the first will always be F.
-        self.path = "FFFFFFFFFFFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
-        self.currentAction = "S"
+        # self.path = "FFFFLFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
+        # self.path = "FFLFFFLFS"
+        self.path = "FFFFFLFFFLFFFFFLFFFS"
+        # self.path = "FFS"
+        self.currentAction = "F"
 
         # the right leg bias param.
         self.rlb = 0.0
@@ -766,6 +770,27 @@ class robot():
                 self.ser.write(dataCMD.encode())
                 timeSend = time.time()
 
+    def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
+        '''
+        This function will stop the robot immediately, the global step will stop to send.
+        No startwalknew() is needed for the next movement.
+        '''
+        dataCMD = json.dumps({'var': "Interruptwalk"})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.stopwalknew()
+        self.isMoving = False
+
     def readGlobalStep(self):
         value_str = self.ser.readline().decode().strip()
         # print("value_str:", value_str)
@@ -781,7 +806,8 @@ class robot():
         input: self.countCrossings, self.path
         output: action to take.
         '''
-        if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
+        # if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
+        if self.atCrossing and (self.prevCrossing == False):
             self.countCrossing += 1
 
         return self.path[self.countCrossing]
@@ -1312,12 +1338,12 @@ class robot():
         # If more than 2 lines were clustered, this result should be dumped;
         # if 2 lines were clustered but they are not orthogonal, this result should also be dumped.
         # print("lineYaw: {}".format(lineYaw))
-        if lineYaw.size > 2: lineYaw = np.array([None])
+        if lineYaw.size > 2: lineYaw = np.array([False])
         elif lineYaw.size == 2 and np.abs(np.abs(lineYaw[0] - lineYaw[1]) - 90) > tolerance: 
             if verbose: print("lineYaw.size == 2")
-            lineYaw = np.array([None])
-        elif lineYaw.size == 0: lineYaw = np.array([None])
-        return lineYaw, entryDir
+            lineYaw = np.array([False])
+        elif lineYaw.size == 0: lineYaw = np.array([False])
+        return np.sort(lineYaw), entryDir
 
 
     def _enqueue(self, item):
@@ -1332,17 +1358,35 @@ class robot():
         '''
         return list(queue)
 
-    def checkCrossing(self):
+    def checkCrossing(self, numTrue = 5):
         '''
         Check whether there is a crossing based on the FIFO.
         '''
         listFIFO = list(self.atCrossingFIFO)
-        if sum(listFIFO) < len(listFIFO) // 2 + 2:
-            self.prevCrossing = self.atCrossing
-            self.atCrossing = False
-        elif sum(listFIFO) >= len(listFIFO) // 2 + 2:
+        print("sum FIFO: {}".format(np.sum(listFIFO)))
+        if all(listFIFO[-numTrue:]) and (not any(listFIFO[:-numTrue])): # detect the rising edge.
+            print("1")
             self.prevCrossing = self.atCrossing
             self.atCrossing = True
+            print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
+        else:
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = False
+        '''
+        elif all(listFIFO[:numTrue]) and (not any(listFIFO[numTrue:])):
+            print("2")
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = False
+        '''
+
+        '''
+        if sum(listFIFO) < len(listFIFO) // 2:
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = False
+        elif sum(listFIFO) >= len(listFIFO) // 2:
+            self.prevCrossing = self.atCrossing
+            self.atCrossing = True
+        '''
 
     def getPoseFromCircles(self, minCircles = 5, verbose=False, display=False):
         '''
@@ -1370,25 +1414,29 @@ class robot():
                 self.bottomLineCentroid = bottomLineCentroid - np.array(self.bottomCamRes) / 2
                 self.bottomLineCentroid = (self.bottomLineCentroid + bottomLineCentroid) / 2  # windowing.
                 self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
-            if bottomLineYaw.all() and self.entryDir.any():  # only change the yaw when the detected yaw(s) is legitimate.
+            if bottomLineYaw.all():  # only change the yaw when the detected yaw(s) is legitimate.
                 # self.bottomLineYaw = bottomLineYaw
                 bottomLineYaw *= -1  # the actual direction
                 self.bottomLineYaw = bottomLineYaw
                 # determine if the robot detects a crossing.
                 if len(self.bottomLineYaw) == 2: 
                     self._enqueue(True)
-                    bottomLineYaw = bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
-                    bottomLineYaw = np.sign(bottomLineYaw) * np.abs(bottomLineYaw)
-                    self.bottomLineYawStraight = bottomLineYaw
+                    # select one yaw from the two detected value.
+                    # bottomLineYaw = bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
+                    # bottomLineYaw = np.sign(bottomLineYaw) * np.abs(bottomLineYaw)
+                    # self.bottomLineYawStraight = bottomLineYaw
+                    self.bottomLineYawStraight = self.bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
                 elif len(self.bottomLineYaw) == 1:
-                    if abs(self.bottomLineYaw) >= 55:
+                    if abs(self.bottomLineYaw) >= 50:
                         # a vertical line detected.
                         self._enqueue(True)
                     else:
+                        if self.entryDir.any():
+                            self.bottomLineYawStraight = self.bottomLineYaw[0]
                         self._enqueue(False)
                 # prevent datatype errors.
-                if isinstance(bottomLineYaw, (int, float)) != True:
-                        bottomLineYaw = bottomLineYaw[0]
+                if isinstance(self.bottomLineYawStraight, (int, float)) != True:
+                        self.bottomLineYawStraight = self.bottomLineYawStraight[0]
                 # check if there is a crossing, with a time window.
                 self.checkCrossing()
                 # determine the current action to take.
@@ -1401,7 +1449,8 @@ class robot():
                         self.lostVision = -2
                     else:
                         self.lostVision = 2
-            else:
+            # else:
+            if (not bottomLineYaw.all()) or (not self.entryDir.any()):
                 # print("bottomLineYaw: {}, self.entryDir: {}".format(bottomLineYaw, entryDir))
                 if self.bottomLineCentroid[0] < 0:
                     self.lostVision = -1
