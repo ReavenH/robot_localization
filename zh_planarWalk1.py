@@ -44,6 +44,15 @@ while True:
         continue
 '''
 
+'''
+myRobot.buzzer(True)
+time.sleep(0.5)
+myRobot.buzzer(False)
+myRobot.resetPose()
+time.sleep(2)
+myRobot.closeGripper()
+'''
+
 myRobot.startwalknew()
 myRobot.triangularwalk(0, distance=20)
 
@@ -81,7 +90,7 @@ while myRobot.cap.isOpened:
                         break
                     else:
                         continue
-                myRobot.freeturn(30)
+                myRobot.freeturn(35) # default 30
                 # time.sleep(2.5)
             '''
             # translate to the left for 3 steps.
@@ -96,6 +105,7 @@ while myRobot.cap.isOpened:
                 time.sleep(2.5)
             '''
             myRobot.countCrossing += 1
+            myRobot.currentAction = 'F'
             '''
             while True:
                 myRobot.getPoseFromCircles()
@@ -170,12 +180,14 @@ while myRobot.cap.isOpened:
         # print("-------------------------------------------------------------------")
 
     except KeyboardInterrupt:
-        myRobot.stopwalknew()
+        # myRobot.stopwalknew()
+        myRobot.interrupt()
         myRobot.ser.close()
         break
 
     except serial.SerialTimeoutException:
-        myRobot.stopwalknew()
+        # myRobot.stopwalknew()
+        myRobot.interrupt()
         myRobot.ser.close()
         print("Serial Timeout, exited.")
         break
