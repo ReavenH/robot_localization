@@ -15,7 +15,7 @@
     "gripperPush": 1750,
     "frameHeight": 240,
     "frameWidth": 320,
-    "largeCirclesMinRadius": 7,
+    "largeCirclesMinRadius": 5,
     "largeCirclesMaxRadius": 20,
     "largeCirclesMinDistance": 20,
     "largeCirclesParam1": 50,

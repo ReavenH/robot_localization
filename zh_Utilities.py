@@ -518,7 +518,7 @@ class robot():
 
         # the right leg bias param.
         self.rlb = 0.0
-        self.rlbPIDParams = np.array([0.0, 0.0, 0.0])  # the P, I, D parameter for the RLB PID Controller.
+        self.rlbPIDParams = np.array([0.01, 0.0, 0.0])  # the P, I, D parameter for the RLB PID Controller.
         self.previous_error = 0.0
 
         print("Robot Class initialized!")
@@ -822,7 +822,7 @@ class robot():
         output: self.RLB (float, the rlb value to the ESP32).
         return: NO RETURN VALUE.
         '''
-        my_yaw = self.bottomLineYawStraight
+        my_yaw = 0 if abs(self.bottomLineYawStraight) <= 3 else self.bottomLineYawStraight
         Kp,Ki,Kd = self.rlbPIDParams
         integral = 0.0
         setpoint = 0.0 
@@ -842,13 +842,33 @@ class robot():
         D_out = Kd * derivative
 
         # PID output
-        self.RLB = max(-0.2,min(P_out + I_out + D_out,0.2))
+        self.RLB = 1000*max(-0.2,min(P_out + I_out + D_out,0.2))
 
         # Update previous error
         self.previous_error = error
 
         return self.RLB
-        
+    
+    def rlbControl(self, val, wait = 1.5):
+        dataCMD = json.dumps({'var': "RLB", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                searchResult = re.search(r'RLB Bias', ack)
+                if searchResult != None:
+                    valAck = re.search(r'RLB Bias: (-?\d+\.\d+)', ack)
+                    if valAck:
+                        valAck = float(valAck.group(1))
+                        print("RLB {} received.".format(valAck))
+                        # if valAck == int(val / 10)/100:
+                        break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
     def buzzer(self, val):
         '''
         val: True (On) or False (Off)
@@ -1384,7 +1404,7 @@ class robot():
         '''
         return list(queue)
 
-    def checkCrossing(self, numTrue = 8, tolerance = 2):
+    def checkCrossing(self, numTrue = 8, tolerance = 3):
         '''
         Check whether there is a crossing based on the FIFO.
         '''
@@ -1400,21 +1420,6 @@ class robot():
             self.prevCrossing = self.atCrossing
             self.atCrossing = False
         print("sum FIFO: {} | tolerance: {} | numTrue: {}".format(np.sum(listFIFO), countTolerance, countTrue))
-        '''
-        elif all(listFIFO[:numTrue]) and (not any(listFIFO[numTrue:])):
-            print("2")
-            self.prevCrossing = self.atCrossing
-            self.atCrossing = False
-        '''
-
-        '''
-        if sum(listFIFO) < len(listFIFO) // 2:
-            self.prevCrossing = self.atCrossing
-            self.atCrossing = False
-        elif sum(listFIFO) >= len(listFIFO) // 2:
-            self.prevCrossing = self.atCrossing
-            self.atCrossing = True
-        '''
 
     def getPoseFromCircles(self, minCircles = 4, verbose=False, display=False):  # default minCircles is 5.
         '''
@@ -1430,7 +1435,7 @@ class robot():
             return None
         
         ret1 = self._detectCircles(frame.copy(), minCircles=minCircles, display=display)
-        retSmall = self._detectSmallDots(frame.copy(), verbose=verbose)
+        # retSmall = self._detectSmallDots(frame.copy(), verbose=verbose)
 
         # process the large circle traces.
         if ret1 != None:
@@ -1489,6 +1494,8 @@ class robot():
         else:
             print("ret1 is {}.".format(ret1))
 
+        
+        '''
         # process the small dot patterns.
         if retSmall != None:
             # print("retSmall[1]: ", retSmall[1])
@@ -1500,10 +1507,13 @@ class robot():
             else:
                 # more the 1 dot detected.
                 self._groupCircles(retSmall[0], retSmall[1])
+        '''
+
         # else:
             # if nothing in the current frame return the previous result.
             # return [self.bottomLineCentroid, self.bottomLineYaw]
 
+        return 1
 
     def measurementUpdate(self, results, useCalibration = True):
         # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.

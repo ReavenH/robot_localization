@@ -8,10 +8,7 @@ from scipy.io import savemat
 
 '''
 TODO:
-1. Separate the system into schedular and the implementation part.
-2. Use FBLR to represent the direction to go, use S to represent stop.
-3. input of the schedular: the number of passed crossings -> to search the action to take at the current crossing.
-4. input of the motionController: the alphabet of the motion to take.
+Add RLB compatibility.
 '''
 
 os.system("sudo systemctl stop serial-getty@ttyS0.service")
@@ -60,7 +57,9 @@ while myRobot.cap.isOpened:
     try:
         myRobot.readGlobalStep()
         # print("global step:", myRobot.globalStep)
-        myRobot.getPoseFromCircles(verbose=False, minCircles=5, display=False)
+        ret = myRobot.getPoseFromCircles(verbose=False, minCircles=5, display=False)
+        if ret == None:  # stop the robot if the camera is down.
+            myRobot.currentAction = 'S'
         flagHistory = np.append(flagHistory, (len(myRobot.bottomLineYaw) == 2))
         # currentAction = myRobot.schedular()
         # print("currentAction: {}".format(currentAction))
@@ -82,15 +81,15 @@ while myRobot.cap.isOpened:
             # adjust the pose before turning.
             # myRobot.getPoseFromCircles()
             # blind turn, wait until globalStep is greater than 1.0
-            myRobot.freeturn(30)
-            for i in range(4):
+            myRobot.freeturn(20)
+            for i in range(5):
                 while True:
                     myRobot.readGlobalStep()
                     if myRobot.globalStep >= 1.0:
                         break
                     else:
                         continue
-                myRobot.freeturn(35) # default 3zh_planarWalk1.py0
+                myRobot.freeturn(20) # default 3zh_planarWalk1.py0
                 # time.sleep(2.5)
             '''
             # translate to the left for 3 steps.
@@ -145,21 +144,20 @@ while myRobot.cap.isOpened:
                     # control the robot.
                     if isturn and myRobot.lostVision == 0:
                         # stopwalknew()
-                        if yaw < -yawTolerance:  # turn to the left.
-                            myRobot.freeturn(min(max(yaw*1.5,7.5),15))  # no more than 15, no less than 7.5
-                        elif yaw > yawTolerance:
-                            myRobot.freeturn(max(min(yaw*1.5,-7.5),-15))  # no less than -15
-
+                        myRobot.rlbPID()
+                        print("RLB: {}".format(myRobot.RLB))
+                        myRobot.rlbControl(myRobot.RLB)
+                        myRobot.triangularwalk(myRobot.walkDir.copy())
                     # tune the params.
                     elif myRobot.lostVision in [-2, 2]:
                         print("into SL")
                         if myRobot.lostVision == 2:
                             print("Slightly lost vision on the right.")
-                            myRobot.triangularwalk(-25, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (45 - 20) + 20))
+                            myRobot.triangularwalk(-25, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (30 - 20) + 20))
                             # continue
                         elif myRobot.lostVision == -2:
                             print("Slightly lost vision on the left.")
-                            myRobot.triangularwalk(15, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (45 - 20) + 20))
+                            myRobot.triangularwalk(15, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (30 - 20) + 20))
                             # continue
                     else:
                         myRobot.triangularwalk(myRobot.walkDir.copy())
@@ -170,13 +168,13 @@ while myRobot.cap.isOpened:
                         # myRobot.stopwalknew()
                         # myRobot.triangularwalk(-90, 20, continuous=False)  # 50 degs for discrete, 30 may be fine for a continuous walk.
                         # time.sleep(0.5)
-                        myRobot.triangularwalk(-30, 30)
+                        myRobot.triangularwalk(-30, 25)
                     elif myRobot.lostVision == -1:
                         print("Lost vision on the left.")
                         # myRobot.stopwalknew()
                         # myRobot.triangularwalk(90, 20, continuous=False)
                         # time.sleep(0.5)
-                        myRobot.triangularwalk(30, 30)       
+                        myRobot.triangularwalk(30, 25)       
         # print("-------------------------------------------------------------------")
 
     except KeyboardInterrupt:
