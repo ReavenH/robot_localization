@@ -673,7 +673,7 @@ class robot():
                 print("Linkage Up.")
             self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
 
-    def triangularwalk(self, degree, distance=40, wait=1.5, token = "Action: Triangular Gait", continuous = True):
+    def triangularwalk(self, degree, distance=35, wait=1.5, token = "Action: Triangular Gait", continuous = True):
         if self.isMoving == False and continuous:
             print("S->M")
             self.startwalknew()
@@ -699,7 +699,8 @@ class robot():
 
     def freeturn(self, degree, wait = 1.5, token = "ActionK: TURNING Once"):
         if self.isMoving == True:
-            self.stopwalknew()
+            # self.stopwalknew()
+            self.interrupt()
         print('FT: ', degree)
         dataCMD = json.dumps({'var':"freeturn", 'val':degree})
         self.ser.write(dataCMD.encode())
@@ -1358,20 +1359,22 @@ class robot():
         '''
         return list(queue)
 
-    def checkCrossing(self, numTrue = 5):
+    def checkCrossing(self, numTrue = 8, tolerance = 2):
         '''
         Check whether there is a crossing based on the FIFO.
         '''
         listFIFO = list(self.atCrossingFIFO)
-        print("sum FIFO: {}".format(np.sum(listFIFO)))
-        if all(listFIFO[-numTrue:]) and (not any(listFIFO[:-numTrue])): # detect the rising edge.
-            print("1")
+        countTrue = sum(listFIFO[-numTrue:])
+        countTolerance = sum(listFIFO[:-numTrue])
+        # if all(listFIFO[-numTrue:]) and (not any(listFIFO[:-numTrue])): # detect the rising edge.
+        if (countTrue >= 4) and (countTolerance <= tolerance):  # detect the rising edge with tolerance.
             self.prevCrossing = self.atCrossing
             self.atCrossing = True
-            print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
-        else:
+            # print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
+        elif countTrue == 0 and countTolerance <= 4:
             self.prevCrossing = self.atCrossing
             self.atCrossing = False
+        print("sum FIFO: {} | tolerance: {} | numTrue: {}".format(np.sum(listFIFO), countTolerance, countTrue))
         '''
         elif all(listFIFO[:numTrue]) and (not any(listFIFO[numTrue:])):
             print("2")
@@ -1388,7 +1391,7 @@ class robot():
             self.atCrossing = True
         '''
 
-    def getPoseFromCircles(self, minCircles = 5, verbose=False, display=False):
+    def getPoseFromCircles(self, minCircles = 4, verbose=False, display=False):  # default minCircles is 5.
         '''
         To detect the circle patterns on the bricks for EACH FRAME.
         Input: config params (minCircles means the frame will be dumped if there are 
