@@ -77,49 +77,28 @@ while myRobot.cap.isOpened:
         elif myRobot.currentAction == 'L':
             myRobot.interrupt()
             time.sleep(0.7)
-            # myRobot.triangularwalk(0, -30, continuous=False)
-            # adjust the pose before turning.
-            # myRobot.getPoseFromCircles()
             # blind turn, wait until globalStep is greater than 1.0
             myRobot.freeturn(20)
-            for i in range(5):
-                while True:
-                    myRobot.readGlobalStep()
-                    if myRobot.globalStep >= 1.0:
-                        break
-                    else:
-                        continue
+            for i in range(4): # default 5
+                myRobot.waitGlobalStep()
                 myRobot.freeturn(20) # default 3zh_planarWalk1.py0
                 # time.sleep(2.5)
+            
             '''
-            # translate to the left for 3 steps.
-            for i in range(2):
-                while True:
-                    myRobot.readGlobalStep()
-                    if myRobot.globalStep >= 1.0:
-                        break
-                    else:
-                        continue
-                myRobot.triangularwalk(90, 30, continuous=False)
-                time.sleep(2.5)
+            # adjust yaw before forward.
+            time.sleep(1.2)
+            myRobot.getPoseFromCircles(minCircles=5, rotAid=True)
+            while myRobot.lostVision == 0 and abs(myRobot.bottomLineYawStraight) > yawTolerance:
+                if myRobot.bottomLineYawStraight < -yawTolerance:  # turn to the left.
+                    myRobot.freeturn(min(max(myRobot.bottomLineYawStraight*1.5,7.5),15))  # no more than 15, no less than 7.5
+                elif myRobot.bottomLineYawStraight > yawTolerance:
+                    myRobot.freeturn(max(min(myRobot.bottomLineYawStraight*1.5,-7.5),-15))  # no less than -15
+                myRobot.waitGlobalStep()
+                myRobot.getPoseFromCircles(minCircles=5, rotAid=True)
             '''
+
             myRobot.countCrossing += 1
             myRobot.currentAction = 'F'
-            '''
-            while True:
-                myRobot.getPoseFromCircles()
-                print("Action L: Yaw is {}".format(myRobot.bottomLineYawStraight))
-                if abs(myRobot.bottomLineYawStraight) < 10:
-                    myRobot.countCrossing += 1
-                    break
-                else:
-                    while True:
-                        myRobot.readGlobalStep()
-                        if myRobot.globalStep >= 1.0:
-                            break
-                    myRobot.freeturn(30)
-                    time.sleep(2.5)  # wait until finish.
-            '''
 
         elif myRobot.currentAction == 'R':
             myRobot.interrupt()
@@ -153,11 +132,11 @@ while myRobot.cap.isOpened:
                         print("into SL")
                         if myRobot.lostVision == 2:
                             print("Slightly lost vision on the right.")
-                            myRobot.triangularwalk(-25, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (30 - 20) + 20))
+                            myRobot.triangularwalk(-25, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (40 - 20) + 20))
                             # continue
                         elif myRobot.lostVision == -2:
                             print("Slightly lost vision on the left.")
-                            myRobot.triangularwalk(15, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (30 - 20) + 20))
+                            myRobot.triangularwalk(15, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (40 - 20) + 20))
                             # continue
                     else:
                         myRobot.triangularwalk(myRobot.walkDir.copy())
@@ -168,13 +147,13 @@ while myRobot.cap.isOpened:
                         # myRobot.stopwalknew()
                         # myRobot.triangularwalk(-90, 20, continuous=False)  # 50 degs for discrete, 30 may be fine for a continuous walk.
                         # time.sleep(0.5)
-                        myRobot.triangularwalk(-30, 25)
+                        myRobot.triangularwalk(-30, 35)  # default 25
                     elif myRobot.lostVision == -1:
                         print("Lost vision on the left.")
                         # myRobot.stopwalknew()
                         # myRobot.triangularwalk(90, 20, continuous=False)
                         # time.sleep(0.5)
-                        myRobot.triangularwalk(30, 25)       
+                        myRobot.triangularwalk(30, 35)       
         # print("-------------------------------------------------------------------")
 
     except KeyboardInterrupt:

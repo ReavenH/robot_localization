@@ -502,6 +502,7 @@ class robot():
         self.lenFIFO = 25
         self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)  # a FIFO window to decide whether the robot is at a crossing based on the proportion. Default length is 17. Length 35 also works.
         self.countCrossing = 0  # to count the number of the crossings that have passed.
+        self.isCounting = True  # True to count.
 
         # the motionController's params.
         self.yawTolerance = 4  # the target range of the freeturn movement.
@@ -512,13 +513,20 @@ class robot():
         # the first will always be F.
         # self.path = "FFFFLFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
         # self.path = "FFLFFFLFS"
-        self.path = "FFFFFLFFFLFFFFFLFFFS"
+        # self.path = "FFFFFLFFFLFFFFFLFFFS"  # for a whole "O" shape.
         # self.path = "FFS"
+        # self.path = "FLFS"
+        # self.path = "FFFFLFFFS"  # for a 3 layer rectilinear consisted of 7 bricks.
+        # self.path = "FFFFFFFFFFFFFFF" # for a climbing test 
+        # self.path = "FFCFCFFLFFFS"
+        # self.path = "FFFFFLFFFLFFFFFLFFFLS"
+        self.path = "GFFFLFPS"  # GFF is a whole picking process.
         self.currentAction = "F"
+        self.prevAction = "F"
 
         # the right leg bias param.
         self.rlb = 0.0
-        self.rlbPIDParams = np.array([0.01, 0.0, 0.0])  # the P, I, D parameter for the RLB PID Controller.
+        self.rlbPIDParams = np.array([0.013, 0.0, 0.0])  # the P=0.01, I, D parameter for the RLB PID Controller.
         self.previous_error = 0.0
 
         print("Robot Class initialized!")
@@ -772,6 +780,27 @@ class robot():
                 self.ser.write(dataCMD.encode())
                 timeSend = time.time()
 
+    def switchIMU(self, status, wait = 1.5, token = "", var = "IMUoff"):
+        if status == True:
+            var = "IMUon"
+            token = "IMU ON"
+        elif status == False:
+            var = "IMUoff"
+            token = "IMU OFF"
+        dataCMD = json.dumps({'var': var})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
     def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
         '''
         This function will stop the robot immediately, the global step will stop to send.
@@ -797,19 +826,33 @@ class robot():
         value_str = self.ser.readline().decode().strip()
         # print("value_str:", value_str)
         global_step_boolean = re.search(r'Global_Step: (-?\d+\.\d+)', value_str)
+        global_step_boolean1 = re.search(r'1668572516', value_str)
         if global_step_boolean:
             self.globalStep = float(global_step_boolean.group(1))
+        elif global_step_boolean1 and self.currentAction == "C":
+            self.isCounting = True
+            self.countCrossing += 1
+            self.currentAction = 'F'
+            print("Step Detected")
         else:
             self.globalStep = -1.0
             print("WARNING: received string \"{}\" is not globalStep".format(value_str))
+
+    def waitGlobalStep(self):
+        while True:
+            self.readGlobalStep()
+            if self.globalStep >= 1.0:
+                break
+            else:
+                continue
 
     def schedular(self):
         '''
         input: self.countCrossings, self.path
         output: action to take.
         '''
-        # if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
-        if self.atCrossing and (self.prevCrossing == False):
+        if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
+        # if self.atCrossing and (self.prevCrossing == False):
             self.countCrossing += 1
 
         return self.path[self.countCrossing]
@@ -1416,12 +1459,12 @@ class robot():
             self.prevCrossing = self.atCrossing
             self.atCrossing = True
             # print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
-        elif countTrue == 0 and countTolerance <= 4:
+        elif countTrue == 0 and countTolerance <= 2:  # default 4.
             self.prevCrossing = self.atCrossing
             self.atCrossing = False
         print("sum FIFO: {} | tolerance: {} | numTrue: {}".format(np.sum(listFIFO), countTolerance, countTrue))
 
-    def getPoseFromCircles(self, minCircles = 4, verbose=False, display=False):  # default minCircles is 5.
+    def getPoseFromCircles(self, minCircles = 4, verbose=False, display=False, rotAid = False):  # default minCircles is 5.
         '''
         To detect the circle patterns on the bricks for EACH FRAME.
         Input: config params (minCircles means the frame will be dumped if there are 
@@ -1444,7 +1487,9 @@ class robot():
             # compute the straight line manhattan centroid
             if self.entryDir.any():
                 bottomLineCentroid = self._getManhattanCentroid(ret1[0][self.entryDir])
+                # print("Original BC:{}".format(bottomLineCentroid))
                 self.bottomLineCentroid = bottomLineCentroid - np.array(self.bottomCamRes) / 2
+                # print("BC:{}".format(self.bottomLineCentroid))
                 self.bottomLineCentroid = (self.bottomLineCentroid + bottomLineCentroid) / 2  # windowing.
                 self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
             if bottomLineYaw.all():  # only change the yaw when the detected yaw(s) is legitimate.
@@ -1453,27 +1498,27 @@ class robot():
                 self.bottomLineYaw = bottomLineYaw
                 # determine if the robot detects a crossing.
                 if len(self.bottomLineYaw) == 2: 
-                    self._enqueue(True)
-                    # select one yaw from the two detected value.
-                    # bottomLineYaw = bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
-                    # bottomLineYaw = np.sign(bottomLineYaw) * np.abs(bottomLineYaw)
-                    # self.bottomLineYawStraight = bottomLineYaw
+                    if not rotAid: self._enqueue(True)
                     self.bottomLineYawStraight = self.bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
+
                 elif len(self.bottomLineYaw) == 1:
                     if abs(self.bottomLineYaw) >= 50:
                         # a vertical line detected.
-                        self._enqueue(True)
+                        if not rotAid: self._enqueue(True)
                     else:
                         if self.entryDir.any():
                             self.bottomLineYawStraight = self.bottomLineYaw[0]
-                        self._enqueue(False)
+                        if not rotAid: self._enqueue(False)
                 # prevent datatype errors.
                 if isinstance(self.bottomLineYawStraight, (int, float)) != True:
                         self.bottomLineYawStraight = self.bottomLineYawStraight[0]
-                # check if there is a crossing, with a time window.
-                self.checkCrossing()
-                # determine the current action to take.
-                self.currentAction = self.schedular()
+                # to block out counting at some cases. e.g. climbing.
+                if self.isCounting:
+                    # check if there is a crossing, with a time window.
+                    self.checkCrossing()
+                    # determine the current action to take.
+                    self.prevAction = self.currentAction
+                    self.currentAction = self.schedular()
                 # check whether the traces are visible to the robot.
                 if np.abs(self.bottomLineCentroid[0]) < self.horizontalLimit:
                     self.lostVision = 0
@@ -1483,7 +1528,7 @@ class robot():
                     else:
                         self.lostVision = 2
             # else:
-            if (not bottomLineYaw.all()) or (not self.entryDir.any()):
+            if (not bottomLineYaw.all()) or ((not self.entryDir.any()) and self.currentAction == 'F'):
                 # print("bottomLineYaw: {}, self.entryDir: {}".format(bottomLineYaw, entryDir))
                 if self.bottomLineCentroid[0] < 0:
                     self.lostVision = -1
