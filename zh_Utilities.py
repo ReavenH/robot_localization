@@ -3,7 +3,7 @@
 # each column: x, y, z point coords,
 import numpy as np
 import sympy as sp
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import serial
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.distance import cdist
@@ -521,13 +521,18 @@ class robot():
         # self.path = "FFCFCFFLFFFS"
         # self.path = "FFFFFLFFFLFFFFFLFFFLS"
         self.path = "GFFFLFPS"  # GFF is a whole picking process.
+        # self.path = "GFFFFFFS"
         self.currentAction = "F"
         self.prevAction = "F"
 
         # the right leg bias param.
         self.rlb = 0.0
-        self.rlbPIDParams = np.array([0.013, 0.0, 0.0])  # the P=0.01, I, D parameter for the RLB PID Controller.
+        self.rlbPIDParams = np.array([0.018, 0.0, 0.0])  # the P=0.013, I, D parameter for the RLB PID Controller.
         self.previous_error = 0.0
+        
+        # the yaw RPY control params.
+        self.rpyPIDParams = np.array([1.5, 0.8, 0.0])  # P, I, D respectively.
+        self.rpyErrors = np.array([0.0, 0.0, 0.0])
 
         print("Robot Class initialized!")
         
@@ -575,9 +580,14 @@ class robot():
         print("Close Gripper.")
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperFasten"], 1/2)
 
+    def brickAlign(self):
+        for i in [1, 2]:
+            self.placeBrick(i, verbose=True)
+
     def placeBrickPhase1(self):
         # progress 1~4.
-        for i in [1, 2, 3, 4]:
+        # for i in [1, 2, 3, 4]:
+        for i in [3, 4]:
             self.placeBrick(i, verbose=True)
 
     def placeBrickPhase2(self):
@@ -614,6 +624,24 @@ class robot():
         # change the walk clearance to default.
         # self.changeclearance()
 
+    def moveLR(self, offset, wait = 1.5):
+        dataCMD = json.dumps({'var': "LRMOVE", 'val': offset})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'LRCOM', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        # self.stopwalknew()
+        self.isMoving = False
+
     def placeBrick(self, progress, verbose=False):
         # primarily called internally by other functions.
         if progress == 1:
@@ -645,7 +673,7 @@ class robot():
             # linkage down.
             if verbose:
                 print("Linkage Down.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown"], 1/10)  # changed
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown"], 1/30)  # changed
             time.sleep(1)
 
         if progress == 5:
@@ -800,6 +828,31 @@ class robot():
                 print("Timeout, resending...")
                 self.ser.write(dataCMD.encode())
                 timeSend = time.time()
+
+    def RPYCtl(self, tar, val, dis = 3.0, wait = 1.5):
+        '''
+        Control API for the yaw, roll and pitch.
+        Tar: STRING type, target to choose between "yaw"/"pitch"/"roll".
+        Val: INT type, adjustment in deg. Can be negative.
+        Dis: DOUBLE type, controls the moving speed, the larger the faster, could be decimal.  
+        After using this API, change clearance to 30 before triangular walk.
+        '''
+        dataCMD = json.dumps({'var': "RPY Control", 'tar': tar, 'val': val, 'dis': dis})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'Target', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        # self.stopwalknew()
+        self.isMoving = False
 
     def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
         '''
@@ -1464,7 +1517,7 @@ class robot():
             self.atCrossing = False
         print("sum FIFO: {} | tolerance: {} | numTrue: {}".format(np.sum(listFIFO), countTolerance, countTrue))
 
-    def getPoseFromCircles(self, minCircles = 4, verbose=False, display=False, rotAid = False):  # default minCircles is 5.
+    def getPoseFromCircles(self, minCircles = 5, verbose=False, display=False, rotAid = False):  # default minCircles is 5.
         '''
         To detect the circle patterns on the bricks for EACH FRAME.
         Input: config params (minCircles means the frame will be dumped if there are 
@@ -1536,9 +1589,12 @@ class robot():
                     self.lostVision = 1
             if verbose: print("Manhattan Centroid: [{:.2f}, {:.2f}] | walkDir: {} | yaw(s): {}\n".format(self.bottomLineCentroid[0], self.bottomLineCentroid[1], self.walkDir, self.bottomLineYaw))
             # return [self.bottomLineCentroid, self.bottomLineYaw]
+
+            return self.bottomLineYawStraight, self.bottomLineCentroid, self.lostVision
+        
         else:
             print("ret1 is {}.".format(ret1))
-
+            return 1
         
         '''
         # process the small dot patterns.
@@ -1558,8 +1614,29 @@ class robot():
             # if nothing in the current frame return the previous result.
             # return [self.bottomLineCentroid, self.bottomLineYaw]
 
-        return 1
+        # return self.bottomLineYawStraight, self.bottomLineCentroid
 
+    def rpyPID(self, tolerance = 0.5, aim = 0, verbose = True):
+        for i in range(12):  # to get the right pose.
+            self.getPoseFromCircles()
+        self.rpyErrors[0] = aim - self.bottomLineYawStraight
+        while abs(self.rpyErrors[0]) > tolerance:  # the limit should be tuned. in degrees.
+            target = np.dot(self.rpyErrors, self.rpyPIDParams.T)
+            print("rpyPID running... Current Error {}, target adjustment {}, lostVision {}".format(self.rpyErrors, target, self.lostVision))
+            time.sleep(0.5)
+            self.RPYCtl('yaw', target)
+            time.sleep(2)
+            for i in range(12):
+                self.getPoseFromCircles()
+            self.rpyErrors[1] += self.rpyErrors[0] 
+            self.rpyErrors[0] = aim - self.bottomLineYawStraight
+        if verbose: print("PID Done, current yaw is {}".format(self.bottomLineYawStraight))
+        '''
+        self.RPYCtl('pitch', 0)
+        self.stopwalknew()
+        self.changeclearance()
+        '''
+        
     def measurementUpdate(self, results, useCalibration = True):
         # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.
         # init storage.

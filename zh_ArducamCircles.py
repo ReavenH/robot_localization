@@ -87,16 +87,16 @@ def detect_and_display_circles(frame):
     # Display the processed frame
     cv2.imshow('Detected Circles', frame)
     
-    '''
+    
     while not cv2.waitKey(1) & 0xFF == ord('w'): 
         continue
-    '''
+    
 
     print("-----------------------------------------------------")
 	
 	
 # Open the camera (0 is usually the default camera)
-cap = cv2.VideoCapture('/dev/video0')
+cap = cv2.VideoCapture('/dev/video1')
 
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)

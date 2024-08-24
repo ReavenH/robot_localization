@@ -73,6 +73,8 @@ while myRobot.cap.isOpened:
             print("Grabing the brick from docker.")
             myRobot.interrupt()
             
+            # TODO: use rpyPID control to align the body.
+
             # buzzer control.
             myRobot.buzzer(True)
             time.sleep(2.5)
@@ -91,7 +93,7 @@ while myRobot.cap.isOpened:
             myRobot.closeGripper()
             time.sleep(0.1)
             myRobot.openGripper()
-            time.sleep(27)  # adjustable.
+            time.sleep(20)  # adjustable. 27 default.
             myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageFlat"], 1/10)
             time.sleep(1)
             myRobot.singleServoCtrl(1, myRobot.servoCriticalAngles["brickFlat"], 1/10)
@@ -100,13 +102,14 @@ while myRobot.cap.isOpened:
             time.sleep(1)
 
             myRobot.buzzer(True)
-            time.sleep(4.5)
+            time.sleep(3)  # default 4.5
             myRobot.buzzer(False)
 
             # pull out the brick.
             myRobot.currentAction = 'F'
             myRobot.countCrossing += 1
             myRobot.triangularwalk(0, distance=walkDis, continuous=True)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles['linkageUp'], 1/10)
             # myRobot.globalStep = 1
 
             '''
@@ -202,16 +205,48 @@ while myRobot.cap.isOpened:
                 # place the brick.
                 myRobot.interrupt()
                 time.sleep(1.5)
-                # TODO: use the RPY control from the ESP32 to rotate body without moving feet.
+                # adjust the yaw offset roughly.
+                for i in range(12):
+                    myRobot.getPoseFromCircles()
+                while abs(myRobot.bottomLineYawStraight) > 8:
+                    if myRobot.bottomLineYawStraight > 0:
+                        myRobot.freeturn(max(min(myRobot.bottomLineYawStraight*1.5,-7.5),-15))
+                        time.sleep(1.2)
+                    elif myRobot.bottomLineYawStraight < 0:
+                        myRobot.freeturn(min(max(myRobot.bottomLineYawStraight*1.5,7.5),15))
+                        time.sleep(1.2)
+                    for i in range(12):
+                        myRobot.getPoseFromCircles()
+                # adjust the lateral offset.
+                for i in range(12):
+                    myRobot.getPoseFromCircles()
+                while myRobot.lostVision != 0:
+                    print("Adjusting lateral offset: lostVision is {}".format(myRobot.lostVision))
+                    if myRobot.lostVision > 0:
+                        myRobot.triangularwalk(-90, 12, continuous=False)
+                        myRobot.waitGlobalStep()
+                    elif myRobot.lostVision < 0:
+                        myRobot.triangularwalk(90, 12, continuous=False)
+                        myRobot.waitGlobalStep()
+                    for i in range(12):
+                        myRobot.getPoseFromCircles()
+                # use the RPY PID control from the ESP32 to rotate body without moving feet.
+                myRobot.brickAlign()
+                time.sleep(1.5)
+                myRobot.rpyPID(aim = -2)
                 myRobot.placeBrickPhase1()
-                myRobot.pushBrick(-36, verbose = True)  # default -32
+                time.sleep(1)
+                myRobot.pushBrick(-32, verbose = True)  # default -32
                 time.sleep(4)
-                myRobot.pushBrick(36, verbose = True)  # default 32
-                myRobot.changeclearance()  # default 30
+                myRobot.rpyPID(aim = -2)
+                myRobot.pushBrick(32, verbose = True)  # default 32
                 time.sleep(4)
                 myRobot.placeBrickPhase2()
                 myRobot.placeBrickPhase3()
                 myRobot.placeBrickPhase4()
+                myRobot.stopwalknew()
+                myRobot.changeclearance()  # default 30
+                myRobot.RPYCtl('yaw', 0)
                 break
 
         # print("-------------------------------------------------------------------")
@@ -246,6 +281,10 @@ while myRobot.cap.isOpened:
         myRobot.ser.close()
         break
 
+# myRobot.changeclearance()
+# myRobot.triangularwalk(0, 0, continuous=False)
+myRobot.interrupt()
+# myRobot.waitGlobalStep()
 myRobot.resetPose()
 pi.stop()
 subprocess.Popen(["sudo", "killall", "pigpiod"])
