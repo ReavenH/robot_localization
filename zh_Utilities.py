@@ -1826,7 +1826,8 @@ class robot():
                             # cv2.circle(cut_image, (circles[i][0], circles[i][1]), circles[i][2], (0, 255, 0), 2)
                             # cv2.circle(cut_image, (circles[j][0], circles[j][1]), circles[j][2], (0, 255, 0), 2)
                             # cv2.line(cut_image, (circles[i][0], circles[i][1]), (circles[j][0], circles[j][1]), (255, 0, 0), 2)
-
+        else:
+            return 0,0
         # change to numpy array
         lines = np.array(lines)
 
@@ -1956,6 +1957,10 @@ class robot():
                         # print(f"Yaw angle: {theta} degrees")
 
                         count += 1
+
+        else:
+
+            return 0,0
         # it will return the distance and yaw
         return distance, yaw
 
