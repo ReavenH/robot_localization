@@ -565,11 +565,11 @@ class robot():
 
     def resetPose(self):
         self.singleServoCtrl(0, self.servoDefaultAngles[0], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         self.singleServoCtrl(1, self.servoDefaultAngles[1], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         self.singleServoCtrl(2, self.servoDefaultAngles[2], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         print("Reset Linkage Pose.")
 
     def openGripper(self):
