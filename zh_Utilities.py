@@ -499,7 +499,7 @@ class robot():
         # whether the robot is at a crossing.
         self.atCrossing = False  # True means detects a crossing.
         self.prevCrossing = False  # whether the robot was at a crossing at the previous time step.
-        self.lenFIFO = 25
+        self.lenFIFO = 30
         self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)  # a FIFO window to decide whether the robot is at a crossing based on the proportion. Default length is 17. Length 35 also works.
         self.countCrossing = 0  # to count the number of the crossings that have passed.
         self.isCounting = True  # True to count.
@@ -520,14 +520,17 @@ class robot():
         # self.path = "FFFFFFFFFFFFFFF" # for a climbing test 
         # self.path = "FFCFCFFLFFFS"
         # self.path = "FFFFFLFFFLFFFFFLFFFLS"
-        self.path = "GFFFLFPS"  # GFF is a whole picking process.
+        # self.path = "GFFFLFPS"  # GFF is a whole picking process.
         # self.path = "GFFFFFFS"
+        # self.path = "GFFFFLFFPS"  # placing the first brick.
+        self.path = "GFLFFFFFFRPS"  # placing the second brick.
+        # self.path = "FRS"
         self.currentAction = "F"
         self.prevAction = "F"
 
         # the right leg bias param.
         self.rlb = 0.0
-        self.rlbPIDParams = np.array([0.018, 0.0, 0.0])  # the P=0.013, I, D parameter for the RLB PID Controller.
+        self.rlbPIDParams = np.array([0.017, 0.0, 0.0])  # the P=0.013, I, D parameter for the RLB PID Controller.
         self.previous_error = 0.0
         
         # the yaw RPY control params.
@@ -710,7 +713,7 @@ class robot():
                 print("Linkage Up.")
             self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
 
-    def triangularwalk(self, degree, distance=35, wait=1.5, token = "Action: Triangular Gait", continuous = True):
+    def triangularwalk(self, degree, distance=35, wait=2, token = "Action: Triangular Gait", continuous = True):
         if self.isMoving == False and continuous:
             print("S->M")
             self.startwalknew()
@@ -1508,11 +1511,11 @@ class robot():
         countTrue = sum(listFIFO[-numTrue:])
         countTolerance = sum(listFIFO[:-numTrue])
         # if all(listFIFO[-numTrue:]) and (not any(listFIFO[:-numTrue])): # detect the rising edge.
-        if (countTrue >= 4) and (countTolerance <= tolerance):  # detect the rising edge with tolerance.
+        if (countTrue >= 7) and (countTolerance <= tolerance):  # detect the rising edge with tolerance.
             self.prevCrossing = self.atCrossing
             self.atCrossing = True
             # print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
-        elif countTrue == 0 and countTolerance <= 2:  # default 4.
+        elif countTrue == 0 and countTolerance <= 1:  # default 4.
             self.prevCrossing = self.atCrossing
             self.atCrossing = False
         print("sum FIFO: {} | tolerance: {} | numTrue: {}".format(np.sum(listFIFO), countTolerance, countTrue))
