@@ -23,7 +23,7 @@ from scipy.io import savemat, loadmat
 from scipy.spatial import distance
 from collections import deque
 
-# pull test
+
 if platform.system() == "Linux":  # if on raspberry pi
     # instantiate gpio control for the servos.
     import subprocess
@@ -462,8 +462,8 @@ class robot():
             with open(config, 'r', encoding='utf-8') as json_file:
                 self.servoCriticalAngles = json.load(json_file)
                 self.config = self.servoCriticalAngles
-            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
-            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
+            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
             # init pins.
             self._servoIOInit(50)
             print("Servos initialized!")
