@@ -23,6 +23,7 @@ from scipy.io import savemat, loadmat
 from scipy.spatial import distance
 from collections import deque
 
+# pull test
 if platform.system() == "Linux":  # if on raspberry pi
     # instantiate gpio control for the servos.
     import subprocess
