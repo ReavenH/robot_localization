@@ -499,7 +499,7 @@ class robot():
         # whether the robot is at a crossing.
         self.atCrossing = False  # True means detects a crossing.
         self.prevCrossing = False  # whether the robot was at a crossing at the previous time step.
-        self.lenFIFO = 25
+        self.lenFIFO = 30
         self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)  # a FIFO window to decide whether the robot is at a crossing based on the proportion. Default length is 17. Length 35 also works.
         self.countCrossing = 0  # to count the number of the crossings that have passed.
         self.isCounting = True  # True to count.
@@ -520,8 +520,13 @@ class robot():
         # self.path = "FFFFFFFFFFFFFFF" # for a climbing test 
         # self.path = "FFCFCFFLFFFS"
         # self.path = "FFFFFLFFFLFFFFFLFFFLS"
-        self.path = "GFFFLFPS"  # GFF is a whole picking process.
+        # self.path = "GFFFLFPS"  # GFF is a whole picking process.
         # self.path = "GFFFFFFS"
+        # self.path = "GFFFFLFFPS"  # placing the first brick.
+        # self.path = "GFLFFFFFFRPS"  # placing the second brick.
+        # self.path = "FRS"
+        # self.path = "FFLFS"
+        self.path = "FCFS"  # for the new climbing test.
         self.currentAction = "F"
         self.prevAction = "F"
 
@@ -565,11 +570,11 @@ class robot():
 
     def resetPose(self):
         self.singleServoCtrl(0, self.servoDefaultAngles[0], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         self.singleServoCtrl(1, self.servoDefaultAngles[1], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         self.singleServoCtrl(2, self.servoDefaultAngles[2], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         print("Reset Linkage Pose.")
 
     def openGripper(self):
@@ -710,11 +715,12 @@ class robot():
                 print("Linkage Up.")
             self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
 
-    def triangularwalk(self, degree, distance=35, wait=1.5, token = "Action: Triangular Gait", continuous = True):
+    def triangularwalk(self, degree, distance=35, wait=2, token = "Action: Triangular Gait", continuous = True, waitAck = True):
         if self.isMoving == False and continuous:
             print("S->M")
             self.startwalknew()
-        print('T DEG: ',degree,' DIS: ',distance)
+            time.sleep(0.1)
+        print("Sending:", 'T DEG: ', degree,' DIS: ', distance)
         dataCMD = json.dumps({'var':"TriangularWalk", 'val':degree, 'dis':distance})
         self.ser.write(dataCMD.encode())
         # not necessary to acknowledge when the dog is moving (in the while loop of startwalknew in the ESP32).
@@ -723,11 +729,11 @@ class robot():
             while True:
                 if self.ser.in_waiting > 0:
                     ack = self.ser.readline().decode().strip()
-                    if ack == token:
+                    if (ack == token or re.search(r'Action: Triangular Gait', ack)) or (not waitAck):
                         print("{} received.".format(ack))
                         break
                 if time.time() - timeSend > wait:
-                    print("Timeout, resending...")
+                    print("Timeout, resending..., received [{}]".format(ack))
                     self.ser.write(dataCMD.encode())
                     timeSend = time.time()
         if continuous: 
@@ -853,7 +859,53 @@ class robot():
                 timeSend = time.time()
         # self.stopwalknew()
         self.isMoving = False
+        
+    def climbTest(self, val = 1, wait = 1.5, token = "Climb Test"):
+        dataCMD = json.dumps({'var': "ClimbTest", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'Climb Test', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.isMoving = False
 
+    def stopClimb(self, wait = 1.5, token = "Stop Climb"):
+        dataCMD = json.dumps({'var': "StopClimb"})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.isMoving = False
+
+    def startClimbingAPI(self):
+        self.climbTest()
+        self.stopwalknew()
+        self.triangularwalk(0, 40, waitAck=False)
+
+    def stopClimbingAPI(self):
+        self.stopClimb()
+        self.stopwalknew()
+        self.climbTest(val=0)
+
+    def nailDownPhase1(self):
+        pass
+      
     def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
         '''
         This function will stop the robot immediately, the global step will stop to send.
@@ -879,7 +931,7 @@ class robot():
         value_str = self.ser.readline().decode().strip()
         # print("value_str:", value_str)
         global_step_boolean = re.search(r'Global_Step: (-?\d+\.\d+)', value_str)
-        global_step_boolean1 = re.search(r'1668572516', value_str)
+        global_step_boolean1 = re.search(r'1668572516', value_str)  # the flag from ESP.
         if global_step_boolean:
             self.globalStep = float(global_step_boolean.group(1))
         elif global_step_boolean1 and self.currentAction == "C":
@@ -1500,19 +1552,21 @@ class robot():
         '''
         return list(queue)
 
-    def checkCrossing(self, numTrue = 8, tolerance = 3):
+
+    def checkCrossing(self, numTrue = 9, tolerance = 5):
         '''
         Check whether there is a crossing based on the FIFO.
+        numTrue default is 8.
         '''
         listFIFO = list(self.atCrossingFIFO)
         countTrue = sum(listFIFO[-numTrue:])
         countTolerance = sum(listFIFO[:-numTrue])
         # if all(listFIFO[-numTrue:]) and (not any(listFIFO[:-numTrue])): # detect the rising edge.
-        if (countTrue >= 4) and (countTolerance <= tolerance):  # detect the rising edge with tolerance.
+        if (countTrue >= 6) and (countTolerance <= tolerance):  # detect the rising edge with tolerance.
             self.prevCrossing = self.atCrossing
             self.atCrossing = True
             # print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
-        elif countTrue == 0 and countTolerance <= 2:  # default 4.
+        elif countTrue == 0 and countTolerance <= 1:  # default 4.
             self.prevCrossing = self.atCrossing
             self.atCrossing = False
         print("sum FIFO: {} | tolerance: {} | numTrue: {}".format(np.sum(listFIFO), countTolerance, countTrue))
@@ -1617,8 +1671,10 @@ class robot():
         # return self.bottomLineYawStraight, self.bottomLineCentroid
 
     def rpyPID(self, tolerance = 0.5, aim = 0, verbose = True):
-        for i in range(12):  # to get the right pose.
+        for i in range(6):  # to get the right pose.
+            time.sleep(0.1)
             self.getPoseFromCircles()
+            if verbose: print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
         self.rpyErrors[0] = aim - self.bottomLineYawStraight
         while abs(self.rpyErrors[0]) > tolerance:  # the limit should be tuned. in degrees.
             target = np.dot(self.rpyErrors, self.rpyPIDParams.T)
@@ -1626,16 +1682,14 @@ class robot():
             time.sleep(0.5)
             self.RPYCtl('yaw', target)
             time.sleep(2)
-            for i in range(12):
+
+            for i in range(6):
+                time.sleep(0.1)
                 self.getPoseFromCircles()
+                if verbose: print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
             self.rpyErrors[1] += self.rpyErrors[0] 
             self.rpyErrors[0] = aim - self.bottomLineYawStraight
         if verbose: print("PID Done, current yaw is {}".format(self.bottomLineYawStraight))
-        '''
-        self.RPYCtl('pitch', 0)
-        self.stopwalknew()
-        self.changeclearance()
-        '''
         
     def measurementUpdate(self, results, useCalibration = True):
         # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.

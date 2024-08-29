@@ -1,0 +1,1 @@
+ffmpeg -f v4l2 -input_format mjpeg -video_size 160x120 -i /dev/video0 -vf 'format=yuv420p' -f sdl "Video Stream"
