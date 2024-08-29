@@ -83,23 +83,24 @@ while myRobot.cap.isOpened:
             # blind turn, wait until globalStep is greater than 1.0
             myRobot.freeturn(-25)
             time.sleep(1.3)
-            for i in range(7): # default 5
+            for i in range(6): # default 5
                 # myRobot.waitGlobalStep()
                 myRobot.freeturn(-25) # default 3zh_planarWalk1.py0
-                time.sleep(1)
-                for i in range(12):
+                time.sleep(1.3)
+                for i in range(6):
+                    time.sleep(0.1)
                     myRobot.getPoseFromCircles()
                 print("LostVision: {}".format(myRobot.lostVision))
                 # time.sleep(2.5)
+            '''
+            for i in range (1):
+                myRobot.triangularwalk(0, 35, continuous=False)
+                time.sleep(1.2)
+            '''
             myRobot.countCrossing += 1
             myRobot.prevAction = myRobot.currentAction
             myRobot.currentAction = myRobot.path[myRobot.countCrossing]
             lastTurnTime = time.time()
-
-        elif myRobot.currentAction == 'R':
-            myRobot.interrupt()
-            print("Action Interrputed (currentAction is 'R')")
-            break
 
         elif myRobot.currentAction == "G":  
             # grab the brick from docker.
@@ -107,8 +108,10 @@ while myRobot.cap.isOpened:
             myRobot.interrupt()
             
             # TODO: use rpyPID control to align the body.
-            for i in range(12):
+            for i in range(6):
+                time.sleep(0.1)
                 myRobot.getPoseFromCircles()
+                # print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             while abs(myRobot.bottomLineYawStraight) > 8:
                 if myRobot.bottomLineYawStraight > 0:
                     myRobot.freeturn(max(min(myRobot.bottomLineYawStraight*1.5,-7.5),-15))
@@ -116,8 +119,10 @@ while myRobot.cap.isOpened:
                 elif myRobot.bottomLineYawStraight < 0:
                     myRobot.freeturn(min(max(myRobot.bottomLineYawStraight*1.5,7.5),15))
                     time.sleep(1.2)
-                for i in range(12):
+                for i in range(6):
+                    time.sleep(0.1)
                     myRobot.getPoseFromCircles()
+                    # print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             myRobot.RPYCtl('pitch', 0)
             time.sleep(2)
             myRobot.rpyPID(aim=-1, tolerance=1.0)
@@ -160,6 +165,13 @@ while myRobot.cap.isOpened:
             myRobot.changeclearance()
             for i in range(4):
                 myRobot.waitGlobalStep()
+                for j in range(5):
+                    time.sleep(0.1)
+                    myRobot.getPoseFromCircles()
+                myRobot.rlbPID()
+                myRobot.rlbControl(myRobot.RLB)
+                myRobot.triangularwalk(myRobot.walkDir.copy(), distance=walkDis)
+
             myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles['linkageUp'], 1/10)
             
             # notify the docker.
@@ -203,8 +215,10 @@ while myRobot.cap.isOpened:
                 myRobot.triangularwalk(90, 15, continuous=False)
                 time.sleep(1.4)
             # adjust the yaw offset roughly.
-            for i in range(12):
+            for i in range(7):
+                time.sleep(0.1)
                 myRobot.getPoseFromCircles()
+                print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             while abs(myRobot.bottomLineYawStraight) > 8:
                 if myRobot.bottomLineYawStraight > 0:
                     myRobot.freeturn(max(min(myRobot.bottomLineYawStraight*1.5,-7.5),-15))
@@ -212,21 +226,33 @@ while myRobot.cap.isOpened:
                 elif myRobot.bottomLineYawStraight < 0:
                     myRobot.freeturn(min(max(myRobot.bottomLineYawStraight*1.5,7.5),15))
                     time.sleep(1.2)
-                for i in range(12):
+                for i in range(6):
+                    time.sleep(0.1)
                     myRobot.getPoseFromCircles()
+                    print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             # adjust the lateral offset.
-            for i in range(12):
+            for i in range(6):
+                time.sleep(0.1)
                 myRobot.getPoseFromCircles()
+                print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             while myRobot.lostVision != 0:
                 print("Adjusting lateral offset: lostVision is {}".format(myRobot.lostVision))
                 if myRobot.lostVision > 0:
-                    myRobot.triangularwalk(-90, 12, continuous=False)
+                    if myRobot.lostVision == 2:
+                        myRobot.triangularwalk(-90, 10, continuous=False)
+                    elif myRobot.lostVision == 1:
+                        myRobot.triangularwalk(-90, 12, continuous=False)
                     myRobot.waitGlobalStep()
                 elif myRobot.lostVision < 0:
-                    myRobot.triangularwalk(90, 12, continuous=False)
+                    if myRobot.lostVision == -2:
+                        myRobot.triangularwalk(90, 10, continuous=False)
+                    elif myRobot.lostVision == -1:
+                        myRobot.triangularwalk(90, 12, continuous=False)
                     myRobot.waitGlobalStep()
-                for i in range(12):
+                for i in range(6):
+                    time.sleep(0.1)
                     myRobot.getPoseFromCircles()
+                    print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             # use the RPY PID control from the ESP32 to rotate body without moving feet.
             myRobot.brickAlign()
             time.sleep(1.5)
@@ -252,8 +278,9 @@ while myRobot.cap.isOpened:
 
             if myRobot.currentAction == 'F' or myRobot.currentAction == 'C':
 
+                print("dt: {}".format(time.time() - lastTurnTime))
                 if myRobot.isCounting == False:
-                    if time.time() - lastTurnTime >= 9.0:
+                    if myRobot.currentAction == 'F' and (time.time() - lastTurnTime >= 9.0):
                         myRobot.isCounting = True
                 
                 # turn on IMU before climbing.
@@ -265,10 +292,16 @@ while myRobot.cap.isOpened:
                     myRobot.interrupt()
                     
                     '''
-                    myRobot.changeclearance(val=30)
-                    myRobot.switchIMU(True)
-                    walkDis = 50
+                    # myRobot.changeclearance(val=30)
+                    # myRobot.switchIMU(True)
+                    myRobot.stopwalknew()
+                    time.sleep(1)
+                    walkDis = 40
                     myRobot.isCounting = False
+                    # start climbing.
+                    myRobot.startClimbingAPI()
+                    lastTurnTime = time.time()
+
 
                 elif myRobot.currentAction == "F" and myRobot.prevAction == "C":
                     '''
@@ -278,9 +311,12 @@ while myRobot.cap.isOpened:
                     myRobot.interrupt()
                     myRobot.changeclearance(val=30)
                     '''
+                    # stop climbing API.
+                    myRobot.stopClimbingAPI()
+                    # walk control.
                     myRobot.changeclearance(val=30)
                     myRobot.switchIMU(False)
-                    walkDis = 40  # default 35
+                    walkDis = 35  # default 35
 
                 if myRobot.lostVision in [0, 2, -2]:
 
@@ -321,37 +357,17 @@ while myRobot.cap.isOpened:
                         print("Lost vision on the left.")
                         myRobot.triangularwalk(30, 35)    
 
-
         # print("-------------------------------------------------------------------")
 
     except KeyboardInterrupt:
-        # myRobot.stopwalknew()
-        myRobot.interrupt()
-        myRobot.resetPose()
-        pi.stop()
-        subprocess.Popen(["sudo", "killall", "pigpiod"])
-        myRobot.switchIMU(False) 
-        myRobot.ser.close()
         break
 
     except serial.SerialTimeoutException:
-        # myRobot.stopwalknew()
-        myRobot.interrupt()
-        myRobot.resetPose()
-        pi.stop()
-        subprocess.Popen(["sudo", "killall", "pigpiod"])
-        myRobot.switchIMU(False) 
-        myRobot.ser.close()
         print("Serial Timeout, exited.")
         break
 
     except NameError:
-        myRobot.interrupt()
-        myRobot.resetPose()
-        pi.stop()
-        subprocess.Popen(["sudo", "killall", "pigpiod"])
-        myRobot.switchIMU(False) 
-        myRobot.ser.close()
+        print("NameError, exited...")
         break
 
 # myRobot.changeclearance()
