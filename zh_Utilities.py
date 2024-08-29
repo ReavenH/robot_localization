@@ -859,7 +859,7 @@ class robot():
                 timeSend = time.time()
         # self.stopwalknew()
         self.isMoving = False
-
+        
     def climbTest(self, val = 1, wait = 1.5, token = "Climb Test"):
         dataCMD = json.dumps({'var': "ClimbTest", 'val': val})
         self.ser.write(dataCMD.encode())
@@ -905,7 +905,7 @@ class robot():
 
     def nailDownPhase1(self):
         pass
-
+      
     def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
         '''
         This function will stop the robot immediately, the global step will stop to send.
@@ -1552,6 +1552,7 @@ class robot():
         '''
         return list(queue)
 
+
     def checkCrossing(self, numTrue = 9, tolerance = 5):
         '''
         Check whether there is a crossing based on the FIFO.
@@ -1681,6 +1682,7 @@ class robot():
             time.sleep(0.5)
             self.RPYCtl('yaw', target)
             time.sleep(2)
+
             for i in range(6):
                 time.sleep(0.1)
                 self.getPoseFromCircles()
@@ -1815,6 +1817,206 @@ class robot():
         brickPoseBodyFrame = np.array([0, 0, 0, 0, 0, 0])  # ignore the actuation mechanism.
         poseProposal = (self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:])).dot(brickPoseBodyFrame)
 
+    # by Haocheng Peng 8.24
+    # The next three functions are used to get the distance between two lines and get the yaw of the second line
+    # If you want  to use it the only thing you need to input is the frame
+
+    # get the slope and intercept
+    def calculate_slope_intercept(self, x1, y1, x2, y2):
+        if x2 == x1:  # avoid dividing zero
+            raise ValueError("The line is vertical, slope is undefined.")
+        slope = (y2 - y1) / (x2 - x1)
+        intercept = y1 - slope * x1
+        return slope, intercept
+
+    # fit the line
+    def fit_line(self, points):
+        A = np.vstack([points[:, 0], np.ones(len(points))]).T
+        m, c = np.linalg.lstsq(A, points[:, 1], rcond=None)[0]
+        return m, c
+
+    def get_distance_between_two_lines(self, image):
+
+        yaw = 0
+        distance = 0
+        lines = []
+        height, width = image.shape[:2]
+
+        # get the middle 1/3 area
+        middle_start = width // 3
+        middle_end = 2 * width // 3
+
+        # get the lower part
+        down_height_start = height // 2
+        down_height_end = 5 * height // 6
+
+        cut_image = image[down_height_start:down_height_end, middle_start:middle_end]
+
+        # change to gray map
+        gray = cv2.cvtColor(cut_image, cv2.COLOR_BGR2GRAY)
+
+
+        # use hough circles to detect circles
+        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20,
+                                   param1=50, param2=30, minRadius=5, maxRadius=25)
+
+        points = []
+        # if we get circles
+        if circles is not None:
+            circles = np.round(circles[0, :]).astype("int")
+
+            # sort using the x labels
+            circles = sorted(circles, key=lambda c: c[0])
+
+            # detect the circles in a straight line
+            for i in range(len(circles)):
+                for j in range(i + 1, len(circles) - 1):
+                    for z in range(i + 2, len(circles)):
+                        # if x is close it is vertical line
+                        if abs(circles[i][0] - circles[j][0]) < 10 and abs(circles[j][0] - circles[z][0]) < 10:
+                            lines.append(((circles[i][0], circles[i][1]), (circles[j][0], circles[j][1])))
+                            lines.append(((circles[j][0], circles[j][1]), (circles[z][0], circles[z][1])))
+                            # label them
+                            # cv2.circle(cut_image, (circles[i][0], circles[i][1]), circles[i][2], (0, 255, 0), 2)
+                            # cv2.circle(cut_image, (circles[j][0], circles[j][1]), circles[j][2], (0, 255, 0), 2)
+                            # cv2.line(cut_image, (circles[i][0], circles[i][1]), (circles[j][0], circles[j][1]), (255, 0, 0), 2)
+        else:
+            return 0,0
+        # change to numpy array
+        lines = np.array(lines)
+
+        # get all points
+        all_points = []
+        for line in lines:
+            all_points.extend(line)
+        all_points = np.array(all_points)
+
+        # fit line
+        m, c = fit_line(all_points)
+
+        # get the start and end points from the fit line
+        x_values = np.array([min(all_points[:, 0]), max(all_points[:, 0])])
+        y_values = m * x_values + c
+        start_point = [int(x_values[0]), int(y_values[0])]
+        end_point = [int(x_values[1]), int(y_values[1])]
+
+        # print(start_point)
+        # print it
+        # cv2.line(cut_image, start_point, end_point, (0, 255, 255), 2)
+
+        '''
+        # use the adjustable windows to display image
+        window_name = 'Detected Line'
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)  
+
+       
+        cv2.resizeWindow(window_name, 800, 600) 
+
+        
+        cv2.moveWindow(window_name, 100, 100) 
+
+        
+        cv2.imshow(window_name, cut_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        '''
+
+        cut_image = cv2.cvtColor(cut_image, cv2.COLOR_BGR2GRAY)
+
+        height_cut, width_cut = cut_image.shape[:2]
+
+        cx, cy = width_cut // 2, 0
+
+        # print("origin point is: ", cx,cy)
+
+        # use canny edge detection
+        edges = cv2.Canny(cut_image, 50, 150)
+
+        # use hough transformation to detect lines
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=20, minLineLength=50, maxLineGap=10)
+
+        # draw lines on the image
+        output = cv2.cvtColor(cut_image, cv2.COLOR_GRAY2BGR)
+
+        # set the threshold for the image
+        vertical_threshold = 40
+        # just need one line
+        count = 0
+
+        # limit the length first line's y
+        if start_point[1] < 200:
+            start_point[1] = 200
+
+        if end_point[1] < 200:
+            end_point[1] = 200
+
+        x1_rel1, y1_rel1 = start_point[0] - cx, start_point[1] - cy
+        x2_rel1, y2_rel1 = end_point[0] - cx, end_point[1] - cy
+        # draw the first line
+        cv2.line(output, start_point, end_point, (0, 255, 255), 2)
+        # print("first line x: ",start_point[0],end_point[0])
+        # print("first line y: ",start_point[1],end_point[1])
+        # get the slope and intercept
+        slope1, intercept1 = calculate_slope_intercept(x1_rel1, y1_rel1, x2_rel1, y2_rel1)
+        # print(f"Slope of first line: {slope1}")
+        # print(f"Intercept of first line: {intercept1}")
+
+        if lines is not None:
+            for line in lines:
+
+                x1, y1, x2, y2 = line[0]
+                # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                if abs(x2 - x1) < vertical_threshold:  # 如果x坐标差值小于阈值，则认为是竖直线段
+                    # print the possible first line for test
+                    # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+                    # print("y: ",y1,y2)
+                    # print("x: ",x1,x2)
+                    # cv2.line(output, start_point, end_point, (0, 255, 255), 2)
+                    # print(start_point[1],end_point[1])
+
+                    # if the middle point of second line is approximately above the first line, it is the wanted line
+                    # if they are almost on the same line, then the second line will not return, and the result will be 0 for distance and yaw
+                    if (start_point[1] + end_point[1] - y1 - y2) > 480 and (abs(x1 - start_point[0])) < 250 and (
+                    abs(x1 - start_point[0])) > 20 and count < 1:
+                        cv2.line(output, (x1, y1), (x2, y2), (0, 255, 0), 2)  # 绘制竖直线段
+                        x1_rel2, y1_rel2 = x1 - cx, y1 - cy
+                        x2_rel2, y2_rel2 = x2 - cx, y2 - cy
+                        # print("second line x: ", x1,x2)
+                        # print("second line y: ",y1,y2)
+                        slope2, intercept2 = calculate_slope_intercept(x1_rel2, y1_rel2, x2_rel2, y2_rel2)
+                        # print(f"Slope of second line: {slope2}")
+                        # print(f"Intercept of second line: {intercept2}")
+
+                        # print("The x distance between two lines are: ", (start_point[0] + end_point[0]) / 2 - (x1 + x2) / 2)
+
+                        # if the second line is on the right side of the first line, it is negative. Otherwise, it is positive
+                        distance = (start_point[0] + end_point[0]) / 2 - (x1 + x2) / 2
+
+                        # calculate the degree
+                        theta = np.degrees(np.arctan(slope2))
+
+                        # change the degree to
+                        theta = theta - 90
+                        theta = np.clip(theta, -180, 180)
+
+                        if (theta < -90):
+                            theta = theta + 180
+
+                        if (theta > 90):
+                            theta = theta - 180
+
+                        # negative means on the left side, positive means on the right side
+                        yaw = theta
+                        # print(f"Yaw angle: {theta} degrees")
+
+                        count += 1
+
+        else:
+
+            return 0,0
+        # it will return the distance and yaw
+        return distance, yaw
 
 class brickMap():
     def __init__(self, hm, ax) -> None:
