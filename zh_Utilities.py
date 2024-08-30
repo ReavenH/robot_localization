@@ -23,6 +23,7 @@ from scipy.io import savemat, loadmat
 from scipy.spatial import distance
 from collections import deque
 
+
 if platform.system() == "Linux":  # if on raspberry pi
     # instantiate gpio control for the servos.
     import subprocess
@@ -461,8 +462,8 @@ class robot():
             with open(config, 'r', encoding='utf-8') as json_file:
                 self.servoCriticalAngles = json.load(json_file)
                 self.config = self.servoCriticalAngles
-            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
-            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
+            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
             # init pins.
             self._servoIOInit(50)
             print("Servos initialized!")
@@ -541,6 +542,8 @@ class robot():
         # the yaw RPY control params.
         self.rpyPIDParams = np.array([1.5, 0.8, 0.0])  # P, I, D respectively.
         self.rpyErrors = np.array([0.0, 0.0, 0.0])
+        # The speed of servo 0 when nailing
+        self.speedNail = 1/2
 
         # climbing flag.
         self.isClimbing = False
@@ -2056,6 +2059,249 @@ class robot():
             return 0,0
         # it will return the distance and yaw
         return distance, yaw
+
+    # By Haocheng Peng, pin down two nails under the second layer
+    def two_nails(self):
+        self.bodyPose[-1] = self.brickMap.brickThickness + self.initFeetPos[0][1] - self.linkageFrameOffsets[0][-1]
+        self.feetPosControl(self.initFeetPos)
+        self.propagateAllLegJointPoses()
+
+        # buzzer control.
+        self.buzzer(True)
+        time.sleep(0.5)
+        self.buzzer(False)
+
+        # servo control.
+        # self.resetPose()
+        # time.sleep(1)
+
+        # grasping the brick.
+        # put down two nails
+        self.adjustHeight(95)
+        time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["gripperAdjustment1"], 1 / 10)  # need change 950
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(3)
+        self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail)
+        time.sleep(1)
+        # self.singleServoCtrl(0, 1000, speed_0)
+        # time.sleep(1)
+        # self.singleServoCtrl(0, 1300, speed_0)
+        # time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment1"], 1 / 10)  # need change 950
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["brickDown1"], self.speedNail / 10)  # need change
+        time.sleep(1)
+
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
+        time.sleep(2)
+        # self.singleServoCtrl(2, 2200, 1 / 10)
+        # time.sleep(1)
+        # self.singleServoCtrl(2, 2500, 1 / 10)
+        # time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 20)  # change to 500
+        time.sleep(2)
+
+        # self.singleServoCtrl(1, 900, 1/10)#need change 950
+        # time.sleep(1)
+        # self.pushBrick(-5)
+        # time.sleep(1)
+
+        self.adjustHeight(90, dis=0.5)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment1"], self.speedNail)
+        time.sleep(1)
+
+        self.adjustHeight(80, dis=0.5)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment2"], self.speedNail)
+        time.sleep(1)
+
+        # self.singleServoCtrl(1, 800, 1/10)#need change 950
+        # time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment1"], self.speedNail)
+        time.sleep(1)
+        self.adjustHeight(90)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment3"], self.speedNail)
+        time.sleep(1)
+        self.adjustHeight(100)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.adjustHeight(110)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment3"], self.speedNail / 10)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["gripperAdjustment2"], self.speedNail / 20)
+        time.sleep(3)
+        # self.singleServoCtrl(1, 550, 1/10)#need change 950
+        # time.sleep(1)
+
+        # pin down two nails
+        self.pushBrick(-25)
+        self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment"], 1 / 10)
+        time.sleep(1)
+        self.adjustHeight(80)
+        time.sleep(5)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1 / 2)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1 / 2)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.pushBrick(25)
+
+        # return to the normal state
+        self.adjustHeight(110)
+        time.sleep(3)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)
+        time.sleep(1)
+
+        self.resetPose()
+
+
+    def two_nails_on_board(self):
+
+
+
+        # buzzer control.
+        self.buzzer(True)
+        time.sleep(0.5)
+        self.buzzer(False)
+
+        # servo control.
+        # self.resetPose()
+        # time.sleep(1)
+
+        # grasping the brick.
+        # put down two nails
+
+        self.stopwalknew()
+        self.triangularwalk(0, distance=0)
+        self.changeclearance(0)
+        self.interrupt()
+        self.buzzer(True)
+        time.sleep(0.5)
+        self.buzzer(False)
+        time.sleep(1)
+        print('start pushing')
+        # self.rpyPID(aim=-1, tolerance=1.0)
+        self.stopwalknew()
+
+        self.pushBrick(25)
+        time.sleep(1)
+        self.adjustHeight(95)
+        time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["gripperAdjustment1"], 1 / 10)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(3)
+        self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail)
+        time.sleep(1)
+        # self.singleServoCtrl(0, 1000, speed_0)
+        # time.sleep(1)
+        # self.singleServoCtrl(0, 1300, speed_0)
+        # time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"], 1 / 10)  # need change
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["brickDown2"], self.speedNail / 10)  # need change
+        time.sleep(1)
+
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
+        time.sleep(2)
+        # self.singleServoCtrl(2, 2200, 1 / 10)
+        # time.sleep(1)
+        # self.singleServoCtrl(2, 2500, 1 / 10)
+        # time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(2)
+
+        # self.singleServoCtrl(1, 900, 1/10)#need change 950
+        # time.sleep(1)
+        # self.pushBrick(-5)
+        # time.sleep(1)
+
+        self.adjustHeight(90, dis=0.5)  # need change
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
+        time.sleep(1)
+
+        self.adjustHeight(80, dis=0.5)  # need change
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment5"], self.speedNail)  # need change
+        time.sleep(1)
+
+        # self.singleServoCtrl(1, 800, 1/10)
+        # time.sleep(1)
+
+        self.adjustHeight(90)  # need change
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.adjustHeight(100)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment6"], 1 / 5)  # need change
+        time.sleep(1)
+        self.adjustHeight(110)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment7"], 1 / 5)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(3)
+        # self.singleServoCtrl(1, 550, 1/10)#need change 950
+        # time.sleep(1)
+
+        # pin down two nails
+        self.pushBrick(-49)
+        time.sleep(3)
+        self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment2"], 1 / 10)  # need change
+        time.sleep(1)
+        self.adjustHeight(80)
+        time.sleep(5)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM3"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM4"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.pushBrick(5)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM5"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.pushBrick(19)
+
+        # return to the normal state
+        self.adjustHeight(110)
+        time.sleep(3)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)  # changed
+        time.sleep(1)
+
+        self.resetPose()
+        # self.RPYCtl('yaw', 0)
 
 class brickMap():
     def __init__(self, hm, ax) -> None:

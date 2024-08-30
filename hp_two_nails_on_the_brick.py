@@ -50,29 +50,29 @@ if __name__ == "__main__":
             time.sleep(1)
             myRobot.adjustHeight(95)
             time.sleep(1)
-            myRobot.singleServoCtrl(1, 550, 1/10)
+            myRobot.singleServoCtrl(1, myRobot.servoCriticalAngles["gripperAdjustment1"], 1/10)
             time.sleep(1)
-            myRobot.singleServoCtrl(2, 500, 1/10)
+            myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperAdjustment2"], 1/10)
             time.sleep(3)
-            myRobot.singleServoCtrl(0, 1300, speed_0)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageDown1"], speed_0)
             time.sleep(1)
             # myRobot.singleServoCtrl(0, 1000, speed_0)
             # time.sleep(1)
             # myRobot.singleServoCtrl(0, 1300, speed_0)
             # time.sleep(1)
-            myRobot.singleServoCtrl(1, 900, 1/10)#need change
+            myRobot.singleServoCtrl(1, myRobot.servoCriticalAngles["linkageAdjustment2"], 1/10)#need change
             time.sleep(1)
-            myRobot.singleServoCtrl(0, 2100, speed_0/10)#need change
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["brickDown2"], speed_0/10)#need change
             time.sleep(1)
 
 
-            myRobot.singleServoCtrl(2, 2500, 1/2)
+            myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperLoose"], 1/2)
             time.sleep(2)
             # myRobot.singleServoCtrl(2, 2200, 1 / 10)
             # time.sleep(1)
             # myRobot.singleServoCtrl(2, 2500, 1 / 10)
             # time.sleep(1)
-            myRobot.singleServoCtrl(2, 500, 1/10)
+            myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperAdjustment2"], 1/10)
             time.sleep(2)
 
             # myRobot.singleServoCtrl(1, 900, 1/10)#need change 950
@@ -82,14 +82,14 @@ if __name__ == "__main__":
 
             myRobot.adjustHeight(90,dis=0.5)# need change
             time.sleep(2)
-            myRobot.singleServoCtrl(0, 2200, speed_0)#need change
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["servoAdjustment4"], speed_0)#need change
             time.sleep(1)
 
 
             
             myRobot.adjustHeight(80,dis=0.5)# need change
             time.sleep(2)
-            myRobot.singleServoCtrl(0, 2500, speed_0)# need change
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["servoAdjustment5"], speed_0)# need change
             time.sleep(1)
             
             # myRobot.singleServoCtrl(1, 800, 1/10)
@@ -97,27 +97,27 @@ if __name__ == "__main__":
             
             myRobot.adjustHeight(90)#need change
             time.sleep(1)
-            myRobot.singleServoCtrl(0, 2200, speed_0)#need change
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["servoAdjustment4"], speed_0)#need change
             time.sleep(1)
-            myRobot.singleServoCtrl(2, 500, 1/10)
+            myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperAdjustment2"], 1/10)
             time.sleep(1)
 
             
             myRobot.adjustHeight(100)
             time.sleep(1)
-            myRobot.singleServoCtrl(2, 500, 1/10)
+            myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperAdjustment2"], 1/10)
             time.sleep(1)
             
-            myRobot.singleServoCtrl(0, 2000, 1/5)# need change
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["servoAdjustment6"], 1/5)# need change
             time.sleep(1)
             myRobot.adjustHeight(110)
             time.sleep(1)
-            myRobot.singleServoCtrl(2, 500, 1/10)
+            myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperAdjustment2"], 1/10)
             time.sleep(1)
 
-            myRobot.singleServoCtrl(0, 1700, 1/5)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["servoAdjustment7"], 1/5)
             time.sleep(1)
-            myRobot.singleServoCtrl(0, 500, 1/10)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["gripperAdjustment2"], 1/10)
             time.sleep(3)
             # myRobot.singleServoCtrl(1, 550, 1/10)#need change 950
             # time.sleep(1)
@@ -126,23 +126,23 @@ if __name__ == "__main__":
             #pin down two nails
             myRobot.pushBrick(-49)
             time.sleep(3)
-            myRobot.singleServoCtrl(1, 900, 1/10)# need change
+            myRobot.singleServoCtrl(1, myRobot.servoCriticalAngles["pinDownAdjustment2"], 1/10)# need change
             time.sleep(1)
             myRobot.adjustHeight(80)
             time.sleep(5)
-            myRobot.singleServoCtrl(0, 1500, 1)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["pinDownPWM3"], 1)
             time.sleep(1)
-            myRobot.singleServoCtrl(0, 600, 1/8)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["pinDownPWM2"], 1/8)
             time.sleep(2)
-            myRobot.singleServoCtrl(0, 1800, 1)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["pinDownPWM4"], 1)
             time.sleep(1)
-            myRobot.singleServoCtrl(0, 600, 1/8)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["pinDownPWM2"], 1/8)
             time.sleep(2)
             myRobot.pushBrick(5)
             time.sleep(1)
-            myRobot.singleServoCtrl(0, 2300, 1)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["pinDownPWM5"], 1)
             time.sleep(1)
-            myRobot.singleServoCtrl(0, 600, 1/8)
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["pinDownPWM2"], 1/8)
             time.sleep(2)
             myRobot.pushBrick(19)
             
@@ -150,14 +150,14 @@ if __name__ == "__main__":
             # return to the normal state
             myRobot.adjustHeight(110)
             time.sleep(3)
-            myRobot.singleServoCtrl(0, 600, 1 / 10)#changed
+            myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["pinDownPWM2"], 1 / 10)#changed
             time.sleep(1)
             
             
             cnt+=1
             
         # exit program.
-        # myRobot.resetPose()
+        myRobot.resetPose()
         # myRobot.RPYCtl('yaw', 0)
         myRobot.stopwalknew()
         pi.stop()
@@ -166,7 +166,7 @@ if __name__ == "__main__":
         
 
     except KeyboardInterrupt:
-        # myRobot.resetPose()
+        myRobot.resetPose()
         myRobot.stopwalknew()
         pi.stop()
         subprocess.run('sudo killall pigpiod', shell=True, check=True)
