@@ -526,18 +526,24 @@ class robot():
         # self.path = "GFLFFFFFFRPS"  # placing the second brick.
         # self.path = "FRS"
         # self.path = "FFLFS"
-        self.path = "FCFS"  # for the new climbing test.
+        self.path = "FFLFFCFFLFFS"  # for the new climbing test.
         self.currentAction = "F"
         self.prevAction = "F"
 
         # the right leg bias param.
-        self.rlb = 0.0
+        self.RLB = 0.0
         self.rlbPIDParams = np.array([0.018, 0.0, 0.0])  # the P=0.013, I, D parameter for the RLB PID Controller.
         self.previous_error = 0.0
+        self.rlbSetpoint = 0.0
+        self.walkDis = 35  # default 35
+        self.executeRLB = True
         
         # the yaw RPY control params.
         self.rpyPIDParams = np.array([1.5, 0.8, 0.0])  # P, I, D respectively.
         self.rpyErrors = np.array([0.0, 0.0, 0.0])
+
+        # climbing flag.
+        self.isClimbing = False
 
         print("Robot Class initialized!")
         
@@ -897,14 +903,35 @@ class robot():
         self.climbTest()
         self.stopwalknew()
         self.triangularwalk(0, 40, waitAck=False)
+        self.isClimbing = True
 
     def stopClimbingAPI(self):
         self.stopClimb()
         self.stopwalknew()
         self.climbTest(val=0)
+        self.isClimbing = False
 
     def nailDownPhase1(self):
         pass
+
+    def kpPitch(self, val = 0.01, wait = 1.5):
+        '''
+        Amplify the pitch value to change sensitivity of IMU.
+        '''
+        dataCMD = json.dumps({'var': "KP Pitch", 'fval': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'KP Pitch', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
       
     def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
         '''
@@ -938,7 +965,14 @@ class robot():
             self.isCounting = True
             self.countCrossing += 1
             self.currentAction = 'F'
+            self.prevAction = 'C'
             print("Step Detected")
+            # walk control.
+            self.walkDis = 40  # default 35
+            # self.rlbSetpoint = -10.0
+            self.RLB = 0
+            self.executeRLB = True
+            print("C -> F | rlbSetpoint: {}".format(self.rlbSetpoint))
         else:
             self.globalStep = -1.0
             print("WARNING: received string \"{}\" is not globalStep".format(value_str))
@@ -959,8 +993,9 @@ class robot():
         if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
         # if self.atCrossing and (self.prevCrossing == False):
             self.countCrossing += 1
-
-        return self.path[self.countCrossing]
+            return self.path[self.countCrossing]
+        else:
+            return None
 
     def rlbPID(self):
         '''
@@ -970,13 +1005,15 @@ class robot():
         output: self.RLB (float, the rlb value to the ESP32).
         return: NO RETURN VALUE.
         '''
+        if not self.executeRLB:
+            return
+        
         my_yaw = 0 if abs(self.bottomLineYawStraight) <= 3 else self.bottomLineYawStraight
         Kp,Ki,Kd = self.rlbPIDParams
         integral = 0.0
-        setpoint = 0.0 
 
         # Calculate the error
-        error = setpoint - my_yaw
+        error = self.rlbSetpoint - my_yaw
 
         # Proportional term
         P_out = Kp * error
@@ -1624,8 +1661,10 @@ class robot():
                     # check if there is a crossing, with a time window.
                     self.checkCrossing()
                     # determine the current action to take.
-                    self.prevAction = self.currentAction
-                    self.currentAction = self.schedular()
+                    nextAction = self.schedular()
+                    if nextAction is not None:
+                        self.prevAction = self.currentAction
+                        self.currentAction = nextAction
                 # check whether the traces are visible to the robot.
                 if np.abs(self.bottomLineCentroid[0]) < self.horizontalLimit:
                     self.lostVision = 0
@@ -1822,7 +1861,7 @@ class robot():
     # If you want  to use it the only thing you need to input is the frame
 
     # get the slope and intercept
-    def calculate_slope_intercept(self, x1, y1, x2, y2):
+    def _calculate_slope_intercept(self, x1, y1, x2, y2):
         if x2 == x1:  # avoid dividing zero
             raise ValueError("The line is vertical, slope is undefined.")
         slope = (y2 - y1) / (x2 - x1)
@@ -1830,7 +1869,7 @@ class robot():
         return slope, intercept
 
     # fit the line
-    def fit_line(self, points):
+    def _fit_line(self, points):
         A = np.vstack([points[:, 0], np.ones(len(points))]).T
         m, c = np.linalg.lstsq(A, points[:, 1], rcond=None)[0]
         return m, c
@@ -1892,7 +1931,7 @@ class robot():
         all_points = np.array(all_points)
 
         # fit line
-        m, c = fit_line(all_points)
+        m, c = self._fit_line(all_points)
 
         # get the start and end points from the fit line
         x_values = np.array([min(all_points[:, 0]), max(all_points[:, 0])])
@@ -1957,7 +1996,7 @@ class robot():
         # print("first line x: ",start_point[0],end_point[0])
         # print("first line y: ",start_point[1],end_point[1])
         # get the slope and intercept
-        slope1, intercept1 = calculate_slope_intercept(x1_rel1, y1_rel1, x2_rel1, y2_rel1)
+        slope1, intercept1 = self._calculate_slope_intercept(x1_rel1, y1_rel1, x2_rel1, y2_rel1)
         # print(f"Slope of first line: {slope1}")
         # print(f"Intercept of first line: {intercept1}")
 
@@ -1984,7 +2023,7 @@ class robot():
                         x2_rel2, y2_rel2 = x2 - cx, y2 - cy
                         # print("second line x: ", x1,x2)
                         # print("second line y: ",y1,y2)
-                        slope2, intercept2 = calculate_slope_intercept(x1_rel2, y1_rel2, x2_rel2, y2_rel2)
+                        slope2, intercept2 = self._calculate_slope_intercept(x1_rel2, y1_rel2, x2_rel2, y2_rel2)
                         # print(f"Slope of second line: {slope2}")
                         # print(f"Intercept of second line: {intercept2}")
 
