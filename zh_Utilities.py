@@ -1884,7 +1884,7 @@ class robot():
                             # cv2.circle(cut_image, (circles[j][0], circles[j][1]), circles[j][2], (0, 255, 0), 2)
                             # cv2.line(cut_image, (circles[i][0], circles[i][1]), (circles[j][0], circles[j][1]), (255, 0, 0), 2)
         else:
-            return 0,0
+            return 999,999
         # change to numpy array
         lines = np.array(lines)
 
@@ -2017,7 +2017,7 @@ class robot():
 
         else:
 
-            return 0,0
+            return 999,999
         # it will return the distance and yaw
         return distance, yaw
 
