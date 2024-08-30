@@ -277,23 +277,12 @@ while myRobot.cap.isOpened:
         elif myRobot.currentAction == "C" and myRobot.isCounting == True:
             # myRobot.stopwalknew()
             myRobot.interrupt()
-            time.sleep(0.5)
-            # rlb walk forward 1 step.
-            for i in range(6):
-                myRobot.getPoseFromCircles()
-                time.sleep(0.1)
-            myRobot.rlbPID()
-            myRobot.rlbControl(val=myRobot.RLB)
-            myRobot.triangularwalk(myRobot.walkDir, myRobot.walkDis, continuous = False)
-            myRobot.interrupt()
-            time.sleep(0.5)
-            myRobot.walkDis = 45
-            # myRobot.rlbSetpoint = -10.0  # can be finetuned.
-            myRobot.executeRLB = False
-            myRobot.RLB = -50
+            time.sleep(1)
+            myRobot.walkDis = 40
+            myRobot.rlbSetpoint = -10.0  # can be finetuned.
             myRobot.isCounting = False
             # start climbing.
-            myRobot.kpPitch(val=0.01)
+            myRobot.kpPitch(val=0.0125)
             myRobot.startClimbingAPI()
             lastTurnTime = time.time()
             print("Entering C | rlbSetpoint: {}".format(myRobot.rlbSetpoint))
@@ -354,13 +343,13 @@ while myRobot.cap.isOpened:
                         if myRobot.currentAction == 'F':
                             myRobot.triangularwalk(-30, myRobot.walkDis)  # default 35
                         elif myRobot.currentAction == 'C':
-                            myRobot.triangularwalk(-90, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (30 - 12) + 12))
+                            myRobot.triangularwalk(-90, myRobot.walkDis)
                     elif myRobot.lostVision == -1:
                         print("Lost vision on the left.")
                         if myRobot.currentAction == 'F':
                             myRobot.triangularwalk(30, myRobot.walkDis)    
                         elif myRobot.currentAction == 'C':
-                            myRobot.triangularwalk(90, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (30 - 12) + 12))
+                            myRobot.triangularwalk(90, myRobot.walkDis)
         # print("-------------------------------------------------------------------")
 
     except KeyboardInterrupt:
