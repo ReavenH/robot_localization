@@ -2008,7 +2008,7 @@ class robot():
 
                 x1, y1, x2, y2 = line[0]
                 # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                if abs(x2 - x1) < vertical_threshold:  # 如果x坐标差值小于阈值，则认为是竖直线段
+                if abs(x2 - x1) < vertical_threshold:  
                     # print the possible first line for test
                     # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
