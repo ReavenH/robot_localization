@@ -2008,7 +2008,7 @@ class robot():
 
                 x1, y1, x2, y2 = line[0]
                 # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                if abs(x2 - x1) < vertical_threshold:  
+                if abs(x2 - x1) < vertical_threshold:
                     # print the possible first line for test
                     # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
@@ -2091,6 +2091,8 @@ class robot():
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment1"], 1 / 10)  # need change 950
         time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)  # need change 950
+        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown1"], self.speedNail / 10)  # need change
         time.sleep(1)
 
@@ -2156,7 +2158,11 @@ class robot():
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1 / 2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
@@ -2214,6 +2220,8 @@ class robot():
         # self.singleServoCtrl(0, 1300, speed_0)
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"], 1 / 10)  # need change
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)  # need change 950
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown2"], self.speedNail / 10)  # need change
         time.sleep(1)
