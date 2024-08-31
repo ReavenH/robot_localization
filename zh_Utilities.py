@@ -527,20 +527,23 @@ class robot():
         # self.path = "GFLFFFFFFRPS"  # placing the second brick.
         # self.path = "FRS"
         # self.path = "FFLFS"
-        self.path = "FFLFFCFFLFFS"  # for the new climbing test.
-        self.currentAction = "F"
+        # self.path = "FFLFFCFFLFFS"  # for the new climbing test.
+        # self.path = "GFFFFLFFPACFVFLFFS"
+        self.path = "FCFVFLFFS"
+        # self.path = "FFFFS"
+        self.currentAction = self.path[0]
         self.prevAction = "F"
 
         # the right leg bias param.
         self.RLB = 0.0
-        self.rlbPIDParams = np.array([0.018, 0.0, 0.0])  # the P=0.013, I, D parameter for the RLB PID Controller.
+        self.rlbPIDParams = np.array([0.019, 0.0, 0.0])  # the P=0.013, I, D parameter for the RLB PID Controller.
         self.previous_error = 0.0
         self.rlbSetpoint = 0.0
         self.walkDis = 35  # default 35
         self.executeRLB = True
         
         # the yaw RPY control params.
-        self.rpyPIDParams = np.array([1.5, 0.8, 0.0])  # P, I, D respectively.
+        self.rpyPIDParams = np.array([1.5, 0.9, 0.0])  # P 1.5, I 0.8, D 0.0 respectively.
         self.rpyErrors = np.array([0.0, 0.0, 0.0])
         # The speed of servo 0 when nailing
         self.speedNail = 1/2
@@ -729,7 +732,7 @@ class robot():
             print("S->M")
             self.startwalknew()
             time.sleep(0.1)
-        print("Sending:", 'T DEG: ', degree,' DIS: ', distance)
+        print("Sending:", 'T DEG: ', degree,' DIS: ', distance, 'waitAck', waitAck)
         dataCMD = json.dumps({'var':"TriangularWalk", 'val':degree, 'dis':distance})
         self.ser.write(dataCMD.encode())
         # not necessary to acknowledge when the dog is moving (in the while loop of startwalknew in the ESP32).
@@ -912,10 +915,8 @@ class robot():
         self.stopClimb()
         self.stopwalknew()
         self.climbTest(val=0)
+        self.changeclearance()
         self.isClimbing = False
-
-    def nailDownPhase1(self):
-        pass
 
     def kpPitch(self, val = 0.01, wait = 1.5):
         '''
@@ -975,6 +976,7 @@ class robot():
             # self.rlbSetpoint = -10.0
             self.RLB = 0
             self.executeRLB = True
+            self.globalStep = 1.0
             print("C -> F | rlbSetpoint: {}".format(self.rlbSetpoint))
         else:
             self.globalStep = -1.0
@@ -2053,18 +2055,16 @@ class robot():
                         # print(f"Yaw angle: {theta} degrees")
 
                         count += 1
-
         else:
-
             return 0,0
         # it will return the distance and yaw
         return distance, yaw
 
     # By Haocheng Peng, pin down two nails under the second layer
     def two_nails(self):
-        self.bodyPose[-1] = self.brickMap.brickThickness + self.initFeetPos[0][1] - self.linkageFrameOffsets[0][-1]
-        self.feetPosControl(self.initFeetPos)
-        self.propagateAllLegJointPoses()
+        '''
+        Pin down the two nails.
+        '''
 
         # buzzer control.
         self.buzzer(True)
@@ -2090,6 +2090,8 @@ class robot():
         # self.singleServoCtrl(0, 1300, speed_0)
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment1"], 1 / 10)  # need change 950
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown1"], self.speedNail / 10)  # need change
         time.sleep(1)
@@ -2148,7 +2150,7 @@ class robot():
 
         # pin down two nails
         self.pushBrick(-25)
-        self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment"], 1 / 10)
+        self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment1"], 1 / 10)
         time.sleep(1)
         self.adjustHeight(80)
         time.sleep(5)
@@ -2156,7 +2158,11 @@ class robot():
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1 / 2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
@@ -2173,7 +2179,9 @@ class robot():
 
     def two_nails_on_board(self):
 
-
+        '''
+        Pin down the latter two nails.
+        '''
 
         # buzzer control.
         self.buzzer(True)
@@ -2187,19 +2195,21 @@ class robot():
         # grasping the brick.
         # put down two nails
 
+        '''
         self.stopwalknew()
         self.triangularwalk(0, distance=0)
         self.changeclearance(0)
         self.interrupt()
+        '''
         self.buzzer(True)
         time.sleep(0.5)
         self.buzzer(False)
-        time.sleep(1)
-        print('start pushing')
+        
         # self.rpyPID(aim=-1, tolerance=1.0)
-        self.stopwalknew()
-
-        self.pushBrick(25)
+        # self.stopwalknew()
+        print('start pushing')
+        self.pushBrick(25, verbose=True)
+        # self.stopwalknew()
         time.sleep(1)
         self.adjustHeight(95)
         time.sleep(1)
@@ -2214,6 +2224,8 @@ class robot():
         # self.singleServoCtrl(0, 1300, speed_0)
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"], 1 / 10)  # need change
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown2"], self.speedNail / 10)  # need change
         time.sleep(1)

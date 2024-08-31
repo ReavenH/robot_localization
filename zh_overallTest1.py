@@ -40,17 +40,9 @@ myRobot.globalStep = 1
 myRobot.triangularwalk(0, 20)
 
 lastTurnTime = time.time()
-
+myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageUp"], 1/2)
 while myRobot.cap.isOpened:
     try:
-        # if (myRobot.currentAction == 'F' or myRobot.currentAction == 'C') and myRobot.isMoving == True:
-        myRobot.readGlobalStep()
-        # print("global step:", myRobot.globalStep)
-        # prevent overcounting in turnings.
-        ret = myRobot.getPoseFromCircles(verbose=False, minCircles=5, display=False)
-        if ret == None:  # stop the robot if the camera is down.
-            myRobot.currentAction = 'S'
-        flagHistory = np.append(flagHistory, (len(myRobot.bottomLineYaw) == 2))
         print("isMoving: {} | prevCrossing: {} | atCrossing: {} | currentAction: {} | countCrossing: {} | lostVision: {}".format(myRobot.isMoving, myRobot.prevCrossing, myRobot.atCrossing, myRobot.currentAction, myRobot.countCrossing, myRobot.lostVision))
         
         if myRobot.currentAction == 'S':
@@ -65,16 +57,18 @@ while myRobot.cap.isOpened:
             myRobot.interrupt()
             time.sleep(0.7)
             # blind turn, wait until globalStep is greater than 1.0
-            myRobot.freeturn(20)
-            for i in range(5): # default 5
+            myRobot.freeturn(25)  # default 20
+            for i in range(6): # default 5
                 # myRobot.waitGlobalStep()
-                time.sleep(1.3)
-                myRobot.freeturn(20) # default 3zh_planarWalk1.py0
+                time.sleep(1.7)
+                myRobot.freeturn(25) # default 3zh_planarWalk1.py0
                 # time.sleep(2.5)
             myRobot.countCrossing += 1
             myRobot.prevAction = myRobot.currentAction
             myRobot.currentAction = myRobot.path[myRobot.countCrossing]
+            myRobot.globalStep = 1.0
             lastTurnTime = time.time()
+            myRobot.interrupt()
 
         elif myRobot.currentAction == 'R':
             myRobot.isCounting = False
@@ -100,7 +94,9 @@ while myRobot.cap.isOpened:
             myRobot.countCrossing += 1
             myRobot.prevAction = myRobot.currentAction
             myRobot.currentAction = myRobot.path[myRobot.countCrossing]
+            myRobot.globalStep = 1.0
             lastTurnTime = time.time()
+            myRobot.interrupt()
 
         elif myRobot.currentAction == "G":  
             # grab the brick from docker.
@@ -251,7 +247,8 @@ while myRobot.cap.isOpened:
             # change back the walking mode.
             myRobot.triangularwalk(0, distance=0, waitAck = False)
             myRobot.changeclearance()
-            # myRobot.interrupt()
+            myRobot.interrupt()
+            myRobot.globalStep = 1.0
             # to the next movement.
             myRobot.countCrossing += 1
             myRobot.prevAction = myRobot.currentAction
@@ -306,22 +303,24 @@ while myRobot.cap.isOpened:
             # change back the walking mode.
             myRobot.triangularwalk(0, distance=0, waitAck = False)
             myRobot.changeclearance()
-            # myRobot.interrupt()
+            myRobot.interrupt()
+            myRobot.globalStep = 1.0
             # to the next movement.
             myRobot.countCrossing += 1
             myRobot.prevAction = myRobot.currentAction
             myRobot.currentAction = myRobot.path[myRobot.countCrossing]
-            myRobot.triangularwalk(0, myRobot.walkDis)
+            # myRobot.triangularwalk(0, myRobot.walkDis)
 
         elif myRobot.currentAction == "V":
             '''
             The latter two.
             '''
             # firstly adjust the lateral offset.
+            myRobot.interrupt()
             for i in range(6):
                 time.sleep(0.1)
                 myRobot.getPoseFromCircles()
-            while abs(myRobot.bottomLineYawStraight) > 8:
+            while abs(myRobot.bottomLineYawStraight) > 6:
                 if myRobot.bottomLineYawStraight > 0:
                     myRobot.freeturn(max(min(myRobot.bottomLineYawStraight*1.5,-7.5),-15))
                     time.sleep(1.2)
@@ -331,12 +330,14 @@ while myRobot.cap.isOpened:
                 for i in range(6):
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
+            myRobot.interrupt()
             # pin down the latter two nails.
-            # myRobot.two_nails_on_board()
+            myRobot.two_nails_on_board()
             # change back the walking mode.
             myRobot.triangularwalk(0, distance=0, waitAck = False)
             myRobot.changeclearance()
             myRobot.interrupt()
+            myRobot.globalStep = 1.0
             # to the next movement.
             myRobot.countCrossing += 1
             myRobot.prevAction = myRobot.currentAction
@@ -344,37 +345,41 @@ while myRobot.cap.isOpened:
             # myRobot.triangularwalk(0, myRobot.walkDis)
 
 
-        elif myRobot.prevAction == "F" and myRobot.currentAction == 'F' and myRobot.isClimbing == True:
+        elif myRobot.prevAction == "C" and myRobot.currentAction == 'F' and myRobot.isClimbing == True:
             # stop climbing API.
             myRobot.rlbSetpoint = 0.0
             myRobot.stopClimbingAPI()
-            print("In main C -> F | rlbSetpoint: {}".format(myRobot.rlbSetpoint))
+            print("In main, exiting C | rlbSetpoint: {}".format(myRobot.rlbSetpoint))
 
-        elif myRobot.globalStep >= 1.0:
+        elif myRobot.currentAction == 'F' or myRobot.currentAction == 'C':
 
-            if myRobot.currentAction == 'F' or myRobot.currentAction == 'C':
+            if myRobot.isMoving:
+                myRobot.readGlobalStep()
 
+            ret = myRobot.getPoseFromCircles(verbose=False, minCircles=5, display=False)
+            if ret == None:  # stop the robot if the camera is down.
+                myRobot.currentAction = 'S'
+                
+            if myRobot.globalStep >= 1.0:
                 print("dt: {}".format(time.time() - lastTurnTime))
+
                 if myRobot.isCounting == False:
                     if myRobot.currentAction == 'F' and (time.time() - lastTurnTime >= 9.0):
                         myRobot.isCounting = True
-                
-                if myRobot.lostVision in [0, 2, -2]:
 
+                if myRobot.lostVision in [0, 2, -2]:
                     yaw = myRobot.bottomLineYawStraight
                     print("centroid: [{:.2f}, {:.2f}] | atCrossing: {} |yaw(s): {}".format(myRobot.bottomLineCentroid[0], myRobot.bottomLineCentroid[1], myRobot.atCrossing, yaw))
-
                     isturn = False
                     if np.abs(yaw) > yawThreshold:
                         isturn = True
-
                     # control the robot.
                     if isturn and myRobot.lostVision == 0:
                         # stopwalknew()
                         myRobot.rlbPID()
                         print("RLB: {}".format(myRobot.RLB))
                         myRobot.rlbControl(myRobot.RLB)
-                        myRobot.triangularwalk(myRobot.walkDir.copy(), distance=myRobot.walkDis)
+                        myRobot.triangularwalk(myRobot.walkDir.copy(), distance=myRobot.walkDis, waitAck = (myRobot.prevAction == 'F'))
                     # tune the params.
                     elif myRobot.lostVision in [-2, 2]:
                         print("into SL")
@@ -392,7 +397,6 @@ while myRobot.cap.isOpened:
                         print("RLB: {}".format(myRobot.RLB))
                         myRobot.rlbControl(myRobot.RLB)
                         myRobot.triangularwalk(myRobot.walkDir.copy(), distance=myRobot.walkDis)
-
                 else:
                     # myRobot.startwalknew()
                     if myRobot.lostVision == 1:

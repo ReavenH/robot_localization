@@ -43,7 +43,7 @@
     "pinDownAdjustment1": 1000,
     "pinDownAdjustment2": 900,
     "pinDownPWM1":2500,
-    "pinDownPWM2":600,
+    "pinDownPWM2":850,
     "pinDownPWM3":1500,
     "pinDownPWM4":1800,
     "pinDownPWM5":2300
