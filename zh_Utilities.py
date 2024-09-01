@@ -528,9 +528,12 @@ class robot():
         # self.path = "FRS"
         # self.path = "FFLFS"
         # self.path = "FFLFFCFFLFFS"  # for the new climbing test.
-        # self.path = "GFFFFLFFPACFVFLFFS"
-        self.path = "FCFVFLFFS"
+        # self.path = "GFFFLFFPACFVFLFFFFLFFFFLGFS"  # 1st brick.
+        self.path = "GFFFLFFCFPACFVFLFFFFLFFFFFFLGFS"  # 2nd layer.
+        # self.path = "VFLFFFFLFFFFFFLGFS"  # 2nd layer from the 2nd nailing.
+        # self.path = "FCFVFLFFS"
         # self.path = "FFFFS"
+        # self.path = "FLFFS"
         self.currentAction = self.path[0]
         self.prevAction = "F"
 
@@ -618,7 +621,8 @@ class robot():
 
     def placeBrickPhase4(self):
         # progress 8~9.
-        for i in [8, 9]:
+        # for i in [8, 9]:
+        for i in [9]:
             self.placeBrick(i, verbose=True)
 
     def pushBrick(self, offset, verbose=False):
@@ -1720,13 +1724,14 @@ class robot():
             self.getPoseFromCircles()
             if verbose: print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
         self.rpyErrors[0] = aim - self.bottomLineYawStraight
+        if self.lostVision not in [0, 2, -2]:
+            self.rpyErrors[1] = 0.0  # clear Error I when there is no vision.
         while abs(self.rpyErrors[0]) > tolerance:  # the limit should be tuned. in degrees.
             target = np.dot(self.rpyErrors, self.rpyPIDParams.T)
             print("rpyPID running... Current Error {}, target adjustment {}, lostVision {}".format(self.rpyErrors, target, self.lostVision))
             time.sleep(0.5)
             self.RPYCtl('yaw', target)
             time.sleep(2)
-
             for i in range(6):
                 time.sleep(0.1)
                 self.getPoseFromCircles()
@@ -2149,7 +2154,7 @@ class robot():
         # time.sleep(1)
 
         # pin down two nails
-        self.pushBrick(-25)
+        self.pushBrick(-27)
         self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment1"], 1 / 10)
         time.sleep(1)
         self.adjustHeight(80)
@@ -2166,7 +2171,7 @@ class robot():
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.pushBrick(25)
+        self.pushBrick(27)
 
         # return to the normal state
         self.adjustHeight(110)
@@ -2210,13 +2215,13 @@ class robot():
         print('start pushing')
         self.pushBrick(25, verbose=True)
         # self.stopwalknew()
-        time.sleep(1)
+        # time.sleep(1)
         self.adjustHeight(95)
-        time.sleep(1)
+        # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["gripperAdjustment1"], 1 / 10)
-        time.sleep(1)
+        # time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(3)
+        # time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail)
         time.sleep(1)
         # self.singleServoCtrl(0, 1000, speed_0)
@@ -2224,20 +2229,20 @@ class robot():
         # self.singleServoCtrl(0, 1300, speed_0)
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"], 1 / 10)  # need change
-        time.sleep(1)
+        # time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)
-        time.sleep(1)
+        # time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown2"], self.speedNail / 10)  # need change
-        time.sleep(1)
+        # time.sleep(1)
 
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
-        time.sleep(2)
+        time.sleep(1)
         # self.singleServoCtrl(2, 2200, 1 / 10)
         # time.sleep(1)
         # self.singleServoCtrl(2, 2500, 1 / 10)
         # time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(2)
+        time.sleep(1)
 
         # self.singleServoCtrl(1, 900, 1/10)#need change 950
         # time.sleep(1)
@@ -2247,12 +2252,12 @@ class robot():
         self.adjustHeight(90, dis=0.5)  # need change
         time.sleep(2)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
-        time.sleep(1)
+        # time.sleep(1)
 
         self.adjustHeight(80, dis=0.5)  # need change
         time.sleep(2)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment5"], self.speedNail)  # need change
-        time.sleep(1)
+        # time.sleep(1)
 
         # self.singleServoCtrl(1, 800, 1/10)
         # time.sleep(1)
@@ -2260,36 +2265,36 @@ class robot():
         self.adjustHeight(90)  # need change
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
-        time.sleep(1)
+        # time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(1)
+        # time.sleep(1)
 
         self.adjustHeight(100)
         time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(1)
+        # time.sleep(1)
 
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment6"], 1 / 5)  # need change
-        time.sleep(1)
+        # time.sleep(1)
         self.adjustHeight(110)
         time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(1)
+        # time.sleep(1)
 
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment7"], 1 / 5)
-        time.sleep(1)
+        # time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(3)
+        time.sleep(2)
         # self.singleServoCtrl(1, 550, 1/10)#need change 950
         # time.sleep(1)
 
         # pin down two nails
-        self.pushBrick(-49)
-        time.sleep(3)
+        self.pushBrick(-50)
+        time.sleep(2)
         self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment2"], 1 / 10)  # need change
         time.sleep(1)
         self.adjustHeight(80)
-        time.sleep(5)
+        time.sleep(2)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM3"], 1)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
@@ -2304,13 +2309,13 @@ class robot():
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.pushBrick(19)
-
+        self.pushBrick(20)
+        time.sleep(1)
         # return to the normal state
         self.adjustHeight(110)
-        time.sleep(3)
-        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)  # changed
         time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)  # changed
+        # time.sleep(1)
 
         self.resetPose()
         # self.RPYCtl('yaw', 0)
