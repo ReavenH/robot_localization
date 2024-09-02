@@ -29,7 +29,7 @@ if platform.system() == "Linux":  # if on raspberry pi
     import subprocess
     subprocess.run('sudo pigpiod', shell=True, check=True)
     import pigpio
-    pi = pigpio.pi()
+    pi = pigpio.pi('construction', 8888)
 
     
     # from WAVESHARE, establish serial connection.
@@ -481,6 +481,7 @@ class robot():
 
         # store the previous bottom camera poses.
         self.bottomLineCentroid = [0.0, 0.0]
+        self.bottomLineCentroidCrossing = [0.0, 0.0]
         self.bottomLineYaw = np.array([0.0])
         self.bottomLineYawStraight = 0.0  # it only stores the yaw along the forward direction.
         self.walkDir = 0.0  # in degs.
@@ -529,11 +530,13 @@ class robot():
         # self.path = "FFLFS"
         # self.path = "FFLFFCFFLFFS"  # for the new climbing test.
         # self.path = "GFFFLFFPACFVFLFFFFLFFFFLGFS"  # 1st brick.
-        self.path = "GFFFLFFCFPACFVFLFFFFLFFFFFFLGFS"  # 2nd layer.
+        # self.path = "GFFFLFFCFPACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer.
         # self.path = "VFLFFFFLFFFFFFLGFS"  # 2nd layer from the 2nd nailing.
+        self.path = "PACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from placing.
         # self.path = "FCFVFLFFS"
         # self.path = "FFFFS"
         # self.path = "FLFFS"
+        # self.path = "FFCFFS"
         self.currentAction = self.path[0]
         self.prevAction = "F"
 
@@ -551,9 +554,19 @@ class robot():
         # The speed of servo 0 when nailing
         self.speedNail = 1/2
 
+        # the fbPID params.
+        self.fbPIDParams = np.array([0.15, 0.05, 0.0])
+        self.fbErrors = np.array([0.0, 0.0, 0.0])
+        self.accumulatedSwing = 0.0
+
         # climbing flag.
         self.isClimbing = False
 
+        # no. of place bricks.
+        self.countPlaced = 2
+
+        # whether to push brick.
+        self.push = True
         print("Robot Class initialized!")
         
     def _checkPlatform(self):
@@ -913,6 +926,8 @@ class robot():
         self.climbTest()
         self.stopwalknew()
         self.triangularwalk(0, 40, waitAck=False)
+        self.changeclearance(val=30)
+        self.setTargetPitch(dval = 5)
         self.isClimbing = True
 
     def stopClimbingAPI(self):
@@ -920,6 +935,7 @@ class robot():
         self.stopwalknew()
         self.climbTest(val=0)
         self.changeclearance()
+        self.switchIMU(False)
         self.isClimbing = False
 
     def kpPitch(self, val = 0.01, wait = 1.5):
@@ -1078,9 +1094,56 @@ class robot():
         else:
             print("\nERROR: invalid logic value for the buzzer.\n")
 
-    def buzzerPWM(self, val):
-        dataCMD = json.dumps({'var': "buzzerPWM", 'val': val})
+    def resetIMU(self):
+        dataCMD = json.dumps({'var': "reset"})
         self.ser.write(dataCMD.encode())
+        print("Reset IMU")
+        time.sleep(10)
+        print("Done.")
+        
+    def withBrick(self, val, wait = 1.5):
+        '''
+        tell the ESP whether there is a brick. for gait modes.
+        val: 1 for with a brick; 0 for without any brick.
+        '''
+        dataCMD = json.dumps({'var': "WithBrick", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                searchResult = re.search(r'WITH BRICK', ack)
+                if searchResult != None:
+                    valAck = re.search(r'WITH BRICK: (-?\d+\.\d+)', ack)
+                    if valAck:
+                        valAck = float(valAck.group(1))
+                        print("WITH BRICK: {} received.".format(valAck))
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
+    def setTargetPitch(self, dval = 0, wait = 1.5):
+        dataCMD = json.dumps({'var': "TargetPitch", 'dval': dval})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                searchResult = re.search(r'target pitch', ack)
+                if searchResult != None:
+                    valAck = re.search(r'target pitch: (-?\d+\.\d+)', ack)
+                    if valAck:
+                        valAck = float(valAck.group(1))
+                        print("target pitch: {} received.".format(valAck))
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
 
     def feetPosControl(self, positionMatrix):
         '''
@@ -1598,6 +1661,10 @@ class robot():
         '''
         return list(queue)
 
+    def resetFIFO(self):
+        self.prevCrossing = False
+        self.currentCrossing = False
+        self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)
 
     def checkCrossing(self, numTrue = 9, tolerance = 5):
         '''
@@ -1639,12 +1706,19 @@ class robot():
             # print("bottomLineYaw: {}".format(bottomLineYaw))
             # compute the straight line manhattan centroid
             if self.entryDir.any():
-                bottomLineCentroid = self._getManhattanCentroid(ret1[0][self.entryDir])
+                bottomLineCentroid = np.array(self._getManhattanCentroid(ret1[0][self.entryDir]))
                 # print("Original BC:{}".format(bottomLineCentroid))
                 self.bottomLineCentroid = bottomLineCentroid - np.array(self.bottomCamRes) / 2
                 # print("BC:{}".format(self.bottomLineCentroid))
-                self.bottomLineCentroid = (self.bottomLineCentroid + bottomLineCentroid) / 2  # windowing.
+                self.bottomLineCentroid = (bottomLineCentroid + self.bottomLineCentroid) / 2  # windowing.
                 self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
+                if len(self.bottomLineYaw) == 2:
+                    bottomLineCentroidCrossing = np.array(self._getManhattanCentroid(ret1[0]))
+                    # print("Original BC:{}".format(bottomLineCentroid))
+                    self.bottomLineCentroidCrossing = bottomLineCentroidCrossing - np.array(self.bottomCamRes) / 2
+                    # print("BC:{}".format(self.bottomLineCentroid))
+                    # self.bottomLineCentroidCrossing = (self.bottomLineCentroidCrossing + self.bottomLineCentroidCrossing) / 2  # windowing.
+                    # self.walkDir = - 2 * np.arctan2(self.bottomLineCentroidCrossing[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
             if bottomLineYaw.all():  # only change the yaw when the detected yaw(s) is legitimate.
                 # self.bottomLineYaw = bottomLineYaw
                 bottomLineYaw *= -1  # the actual direction
@@ -1657,6 +1731,8 @@ class robot():
                 elif len(self.bottomLineYaw) == 1:
                     if abs(self.bottomLineYaw) >= 50:
                         # a vertical line detected.
+                        # exploit straight line yaw from it.
+                        self.bottomLineYawStraight = np.sign(self.bottomLineYaw) * (np.abs(self.bottomLineYaw) - 90)
                         if not rotAid: self._enqueue(True)
                     else:
                         if self.entryDir.any():
@@ -1692,7 +1768,7 @@ class robot():
             if verbose: print("Manhattan Centroid: [{:.2f}, {:.2f}] | walkDir: {} | yaw(s): {}\n".format(self.bottomLineCentroid[0], self.bottomLineCentroid[1], self.walkDir, self.bottomLineYaw))
             # return [self.bottomLineCentroid, self.bottomLineYaw]
 
-            return self.bottomLineYawStraight, self.bottomLineCentroid, self.lostVision
+            return self.bottomLineYawStraight, self.bottomLineCentroid, self.bottomLineCentroidCrossing, self.lostVision
         
         else:
             print("ret1 is {}.".format(ret1))
@@ -1739,7 +1815,37 @@ class robot():
             self.rpyErrors[1] += self.rpyErrors[0] 
             self.rpyErrors[0] = aim - self.bottomLineYawStraight
         if verbose: print("PID Done, current yaw is {}".format(self.bottomLineYawStraight))
+        self.rpyErrors[1] = 0.0
         
+    def fbPID(self, tolerance = 10, aim = -40, verbose = True):
+        '''
+        PID to control the swing before placing.
+        '''
+        self.accumulatedSwing = 0.0
+        for i in range(8):  # to get the right pose.
+            time.sleep(0.1)
+            self.getPoseFromCircles()
+            if verbose: print("Crossing Centroid Y: {}, lostVision: {}".format(self.bottomLineCentroidCrossing[1], self.lostVision))
+        self.fbErrors[0] = aim - self.bottomLineCentroidCrossing[1]
+        if self.lostVision not in [0, 2, -2]:
+            self.fbErrors[1] = 0.0
+        while abs(self.fbErrors[0]) > tolerance:
+            target = np.floor(np.clip(np.dot(self.fbErrors, self.fbPIDParams.T), -5, 5))
+            print("FB PID Running ... Current Error {}, target adjustment: {}, lostVision".format(self.fbErrors, target, self.lostVision))
+            self.accumulatedSwing += target
+            if abs(self.accumulatedSwing) >= 32:
+                self.fbErrors[1] = 0.0
+                break
+            self.pushBrick(target, verbose=True)
+            # time.sleep(2.5)
+            for i in range(8):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                if verbose: print("Crossing Centroid Y: {}, lostVision: {}".format(self.bottomLineCentroidCrossing[1], self.lostVision))
+            self.fbErrors[1] += self.fbErrors[0]
+            self.fbErrors[0] = aim - self.bottomLineCentroidCrossing[1]
+        if verbose: print("PID Done, current centroid Y is {}".format(self.bottomLineCentroidCrossing[1]))
+
     def measurementUpdate(self, results, useCalibration = True):
         # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.
         # init storage.
@@ -2219,9 +2325,9 @@ class robot():
         self.adjustHeight(95)
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["gripperAdjustment1"], 1 / 10)
-        # time.sleep(1)
+        time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        # time.sleep(1)
+        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail)
         time.sleep(1)
         # self.singleServoCtrl(0, 1000, speed_0)
@@ -2229,11 +2335,11 @@ class robot():
         # self.singleServoCtrl(0, 1300, speed_0)
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"], 1 / 10)  # need change
-        # time.sleep(1)
+        time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)
-        # time.sleep(1)
+        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown2"], self.speedNail / 10)  # need change
-        # time.sleep(1)
+        time.sleep(1)
 
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
         time.sleep(1)
@@ -2250,14 +2356,14 @@ class robot():
         # time.sleep(1)
 
         self.adjustHeight(90, dis=0.5)  # need change
-        time.sleep(2)
+        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
-        # time.sleep(1)
+        time.sleep(1)
 
         self.adjustHeight(80, dis=0.5)  # need change
-        time.sleep(2)
+        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment5"], self.speedNail)  # need change
-        # time.sleep(1)
+        time.sleep(1)
 
         # self.singleServoCtrl(1, 800, 1/10)
         # time.sleep(1)
@@ -2265,26 +2371,26 @@ class robot():
         self.adjustHeight(90)  # need change
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
-        # time.sleep(1)
+        time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        # time.sleep(1)
+        time.sleep(1)
 
         self.adjustHeight(100)
         time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        # time.sleep(1)
+        time.sleep(1)
 
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment6"], 1 / 5)  # need change
-        # time.sleep(1)
+        time.sleep(1)
         self.adjustHeight(110)
         time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        # time.sleep(1)
+        time.sleep(1)
 
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment7"], 1 / 5)
-        # time.sleep(1)
+        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(2)
+        time.sleep(1)
         # self.singleServoCtrl(1, 550, 1/10)#need change 950
         # time.sleep(1)
 

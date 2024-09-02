@@ -5,6 +5,7 @@ import numpy as np
 import os
 import serial
 from scipy.io import savemat
+from collections import deque
 import subprocess
 import pigpio
 pi = pigpio.pi()
@@ -54,11 +55,12 @@ while myRobot.cap.isOpened:
 
         elif myRobot.currentAction == 'L':
             myRobot.isCounting = False
+            myRobot.resetFIFO()
             myRobot.interrupt()
             time.sleep(0.7)
             # blind turn, wait until globalStep is greater than 1.0
             myRobot.freeturn(25)  # default 20
-            for i in range(8): # default 5
+            for i in range(7): # default 5
                 # myRobot.waitGlobalStep()
                 time.sleep(1.7)
                 myRobot.freeturn(25) # default zh_planarWalk1.py0
@@ -67,11 +69,14 @@ while myRobot.cap.isOpened:
             myRobot.prevAction = myRobot.currentAction
             myRobot.currentAction = myRobot.path[myRobot.countCrossing]
             myRobot.globalStep = 1.0
+            myRobot.atCrossing = False
+            myRobot.prevCrossing = False
             lastTurnTime = time.time()
             myRobot.interrupt()
 
         elif myRobot.currentAction == 'R':
             myRobot.isCounting = False
+            myRobot.resetFIFO()
             myRobot.interrupt()
             time.sleep(0.7)
             # blind turn, wait until globalStep is greater than 1.0
@@ -102,31 +107,30 @@ while myRobot.cap.isOpened:
             # grab the brick from docker.
             print("Grabing the brick from docker.")
             myRobot.interrupt()
-            
+            myRobot.isCounting = False
+            myRobot.resetFIFO()
             # firstly adjust the lateral offset.
             for i in range(6):
-                time.sleep(0.1)
+                time.sleep(0.2)
                 myRobot.getPoseFromCircles()
-                print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
-            while myRobot.lostVision != 0:
-                print("Adjusting lateral offset: lostVision is {}".format(myRobot.lostVision))
-                if myRobot.lostVision > 0:
-                    if myRobot.lostVision == 2:
-                        myRobot.triangularwalk(-90, 10, continuous=False)
-                    elif myRobot.lostVision == 1:
-                        myRobot.triangularwalk(-90, 12, continuous=False)
+                print("Yaw: {}, lostVision: {}, bottomLineCentroidCrossing: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroidCrossing))
+            while abs(myRobot.bottomLineCentroidCrossing[0]) > 10:
+                print("Adjusting lateral offset: centroid x is {}".format(myRobot.bottomLineCentroidCrossing[0]))
+                if myRobot.bottomLineCentroidCrossing[0] > 0:
+                    myRobot.triangularwalk(-90, np.ceil(np.abs(myRobot.bottomLineCentroidCrossing[0]) / 80 * (18 - 12) + 12), continuous = False)
                     myRobot.waitGlobalStep()
-                elif myRobot.lostVision < 0:
-                    if myRobot.lostVision == -2:
-                        myRobot.triangularwalk(90, 10, continuous=False)
-                    elif myRobot.lostVision == -1:
-                        myRobot.triangularwalk(90, 12, continuous=False)
+                elif myRobot.bottomLineCentroidCrossing[0] < 0:
+                    myRobot.triangularwalk(90, np.ceil(np.abs(myRobot.bottomLineCentroidCrossing[0]) / 80 * (18 - 12) + 12), continuous = False)
                     myRobot.waitGlobalStep()
                 time.sleep(0.1)
+                centroidXAvg = 0.0
                 for i in range(6):
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
-                    print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
+                    if i >= 4:
+                        centroidXAvg += myRobot.bottomLineCentroidCrossing[0]
+                        centroidXAvg *= 0.5
+                    print("Yaw: {}, lostVision: {}, centroid-x {}, Avg X {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroidCrossing[0], centroidXAvg))
 
             # Use rpyPID control to align the body.
             for i in range(6):
@@ -144,6 +148,10 @@ while myRobot.cap.isOpened:
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
                     # print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
+            while True:
+                keyInput = input("Press O to finish loading pins...")
+                if keyInput.lower() == 'o':
+                    break
             myRobot.RPYCtl('pitch', 0)
             time.sleep(2)
             myRobot.rpyPID(aim=-1, tolerance=1.0)
@@ -183,6 +191,7 @@ while myRobot.cap.isOpened:
             time.sleep(1)
             myRobot.RPYCtl('yaw', 0)
             time.sleep(1)
+            myRobot.withBrick(1)
             myRobot.interrupt()
             myRobot.triangularwalk(0, distance=myRobot.walkDis, continuous=True)
             myRobot.changeclearance()
@@ -201,8 +210,10 @@ while myRobot.cap.isOpened:
             myRobot.buzzer(True)
             time.sleep(3.5)  # default 4.5
             myRobot.buzzer(False)
+            lastTurnTime = time.time()
 
         elif myRobot.currentAction == "P":
+            myRobot.setTargetPitch(dval = 0)
             # place the brick.
             myRobot.interrupt()
             # mediate offset.
@@ -228,6 +239,7 @@ while myRobot.cap.isOpened:
                     myRobot.getPoseFromCircles()
                     print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             # adjust the lateral offset.
+            '''
             for i in range(6):
                 time.sleep(0.1)
                 myRobot.getPoseFromCircles()
@@ -250,22 +262,63 @@ while myRobot.cap.isOpened:
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
                     print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
+            '''
+            for i in range(6):
+                time.sleep(0.2)
+                myRobot.getPoseFromCircles()
+                print("Yaw: {}, lostVision: {}, bottomLineCentroidCrossing: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroidCrossing))
+            while abs(myRobot.bottomLineCentroidCrossing[0]) > 20:
+                print("Adjusting lateral offset: centroid x is {}".format(myRobot.bottomLineCentroidCrossing[0]))
+                if myRobot.bottomLineCentroidCrossing[0] > 0:
+                    myRobot.triangularwalk(-90, np.ceil(np.abs(myRobot.bottomLineCentroidCrossing[0]) / 80 * (18 - 12) + 12), continuous = False)
+                    myRobot.waitGlobalStep()
+                elif myRobot.bottomLineCentroidCrossing[0] < 0:
+                    myRobot.triangularwalk(90, np.ceil(np.abs(myRobot.bottomLineCentroidCrossing[0]) / 80 * (18 - 12) + 12), continuous = False)
+                    myRobot.waitGlobalStep()
+                time.sleep(0.1)
+                centroidXAvg = 0.0
+                for i in range(6):
+                    time.sleep(0.1)
+                    myRobot.getPoseFromCircles()
+                    if i >= 4:
+                        centroidXAvg += myRobot.bottomLineCentroidCrossing[0]
+                        centroidXAvg *= 0.5
+                    print("Yaw: {}, lostVision: {}, centroid-x {}, Avg X {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroidCrossing[0], centroidXAvg))
             # use the RPY PID control from the ESP32 to rotate body without moving feet.
             myRobot.brickAlign()
             time.sleep(1.5)
             myRobot.rpyPID(aim = -2)
             myRobot.placeBrickPhase1()
             time.sleep(1)
-            myRobot.pushBrick(-35, verbose = True)  # default -32
-            time.sleep(4)
+            if myRobot.countPlaced in [2]:
+                myRobot.push = False
+            else:
+                myRobot.push = True
+            if myRobot.push:
+                myRobot.pushBrick(-35, verbose = True)  # default -32
+                time.sleep(4)
+            else:
+                # myRobot.pushBrick(-25, verbose = True)
+                myRobot.fbPID()
             myRobot.rpyPID(aim = -2)
-            myRobot.pushBrick(40, verbose = True)  # default 32
-            time.sleep(4)
+            if myRobot.push:
+                myRobot.pushBrick(40, verbose = True)  # default 32
+                time.sleep(4)
             myRobot.placeBrickPhase2()
-            myRobot.pushBrick(-35)
+            if myRobot.push:
+                myRobot.pushBrick(-35)
+            else:
+                myRobot.pushBrick(-15)
+                myRobot.accumulatedSwing += (-15)
             myRobot.placeBrickPhase3()
             myRobot.placeBrickPhase4()
-            myRobot.pushBrick(30)
+            if myRobot.push:
+                myRobot.pushBrick(30)
+            else:
+                # myRobot.pushBrick(25, verbose = True)
+                myRobot.pushBrick(-myRobot.accumulatedSwing, verbose = True)
+                myRobot.accumulatedSwing = 0.0
+            myRobot.withBrick(0)
             myRobot.stopwalknew()
             myRobot.changeclearance()  # default 20
             myRobot.RPYCtl('yaw', 0)
@@ -278,6 +331,7 @@ while myRobot.cap.isOpened:
             myRobot.countCrossing += 1
             myRobot.prevAction = myRobot.currentAction
             myRobot.currentAction = myRobot.path[myRobot.countCrossing]
+            myRobot.countPlaced += 1
 
 
         # turn on IMU before climbing.
@@ -299,6 +353,7 @@ while myRobot.cap.isOpened:
             myRobot.executeRLB = False
             myRobot.RLB = -100  # default -50
             myRobot.isCounting = False
+            myRobot.resetFIFO()
             # start climbing.
             myRobot.kpPitch(val=0.01)
             myRobot.startClimbingAPI()
@@ -310,7 +365,14 @@ while myRobot.cap.isOpened:
             The first two.
             '''
             # walk for 1 cycle.
-            myRobot.triangularwalk(0, 35, continuous = False)
+            for j in range(2):
+                for i in range(6):
+                    time.sleep(0.1)
+                    myRobot.getPoseFromCircles()
+                myRobot.rlbPID()
+                myRobot.rlbControl(myRobot.RLB)
+                myRobot.triangularwalk(myRobot.walkDir, myRobot.walkDis - 5, continuous = False)
+                myRobot.waitGlobalStep()
             myRobot.stopwalknew()
             # firstly adjust the lateral offset.
             for i in range(6):
@@ -366,6 +428,8 @@ while myRobot.cap.isOpened:
             The latter two.
             '''
             # TODO: walk for another 8 cycles.
+            myRobot.stopwalknew()
+
             for j in range(4):
                 for i in range(6):
                     time.sleep(0.1)
@@ -401,7 +465,7 @@ while myRobot.cap.isOpened:
                     print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
             # then adjust the yaw offset.
             myRobot.interrupt()
-            for i in range(6):
+            for i in range(8):
                 time.sleep(0.1)
                 myRobot.getPoseFromCircles()
             while abs(myRobot.bottomLineYawStraight) > 3:
@@ -411,7 +475,7 @@ while myRobot.cap.isOpened:
                 elif myRobot.bottomLineYawStraight < 0:
                     myRobot.freeturn(min(max(myRobot.bottomLineYawStraight*1.5,12.5),20))
                     time.sleep(1.2)
-                for i in range(6):
+                for i in range(8):
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
             # myRobot.interrupt()
@@ -449,7 +513,7 @@ while myRobot.cap.isOpened:
                 print("dt: {}".format(time.time() - lastTurnTime))
 
                 if myRobot.isCounting == False:
-                    if myRobot.currentAction == 'F' and (time.time() - lastTurnTime >= 9.0):
+                    if myRobot.currentAction == 'F' and (time.time() - lastTurnTime >= 8.0):
                         myRobot.isCounting = True
 
                 if myRobot.lostVision in [0, 2, -2]:
@@ -470,7 +534,7 @@ while myRobot.cap.isOpened:
                         print("into SL")
                         if myRobot.lostVision == 2:
                             print("Slightly lost vision on the right.")
-                            myRobot.triangularwalk(-25, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (myRobot.walkDis - 20) + 20), waitAck = (myRobot.prevAction == 'F'))
+                            myRobot.triangularwalk(-30, np.ceil(np.abs(myRobot.bottomLineCentroid[1]) / 120 * (myRobot.walkDis - 23) + 23), waitAck = (myRobot.prevAction == 'F'))
                             # continue
                         elif myRobot.lostVision == -2:
                             print("Slightly lost vision on the left.")
