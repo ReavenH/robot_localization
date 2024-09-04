@@ -532,13 +532,15 @@ class robot():
         # self.path = "GFFFLFFPACFVFLFFFFLFFFFLGFS"  # 1st brick.
         # self.path = "GFFFLFFCFPACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer.
         # self.path = "VFLFFFFLFFFFFFLGFS"  # 2nd layer from the 2nd nailing.
-        self.path = "PACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from placing.
+        # self.path = "PACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from placing.
+        self.path = "FCFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from climbing.
         # self.path = "FCFVFLFFS"
         # self.path = "FFFFS"
         # self.path = "FLFFS"
-        # self.path = "FFCFFS"
+        # self.path = "FFCFFFS"
         self.currentAction = self.path[0]
         self.prevAction = "F"
+        self.pprevAction = "F"
 
         # the right leg bias param.
         self.RLB = 0.0
@@ -561,6 +563,8 @@ class robot():
 
         # climbing flag.
         self.isClimbing = False
+        self.isClimbing1 = True
+        self.adjustedPose = True
 
         # no. of place bricks.
         self.countPlaced = 2
@@ -925,7 +929,7 @@ class robot():
     def startClimbingAPI(self):
         self.climbTest()
         self.stopwalknew()
-        self.triangularwalk(0, 40, waitAck=False)
+        self.triangularwalk(0, self.walkDis, waitAck=False)
         self.changeclearance(val=30)
         self.setTargetPitch(dval = 5)
         self.isClimbing = True
@@ -957,6 +961,28 @@ class robot():
                 self.ser.write(dataCMD.encode())
                 timeSend = time.time()
       
+    def climbDetectedThreshold(self, val = 5, wait = 1.5):
+        dataCMD = json.dumps({'var': "Climb Detect Threshold", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'Climb Detect Threshold', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+    
+    def updateActionHistory(self):
+        self.countCrossing += 1
+        self.pprevAction = self.prevAction
+        self.prevAction = self.currentAction
+        self.currentAction = self.path[self.countCrossing]
+
     def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
         '''
         This function will stop the robot immediately, the global step will stop to send.
@@ -978,7 +1004,7 @@ class robot():
         self.stopwalknew()
         self.isMoving = False
 
-    def readGlobalStep(self):
+    def readGlobalStep(self, verbose = True):
         value_str = self.ser.readline().decode().strip()
         # print("value_str:", value_str)
         global_step_boolean = re.search(r'Global_Step: (-?\d+\.\d+)', value_str)
@@ -987,9 +1013,7 @@ class robot():
             self.globalStep = float(global_step_boolean.group(1))
         elif global_step_boolean1 and self.currentAction == "C":
             self.isCounting = True
-            self.countCrossing += 1
-            self.currentAction = 'F'
-            self.prevAction = 'C'
+            self.updateActionHistory()
             print("Step Detected")
             # walk control.
             self.walkDis = 40  # default 35
@@ -997,10 +1021,11 @@ class robot():
             self.RLB = 0
             self.executeRLB = True
             self.globalStep = 1.0
+            self.kpPitch(val = 0.1)
             print("C -> F | rlbSetpoint: {}".format(self.rlbSetpoint))
         else:
             self.globalStep = -1.0
-            print("WARNING: received string \"{}\" is not globalStep".format(value_str))
+            if verbose: print("WARNING: received string \"{}\" is not globalStep".format(value_str))
 
     def waitGlobalStep(self):
         while True:
@@ -1748,6 +1773,7 @@ class robot():
                     # determine the current action to take.
                     nextAction = self.schedular()
                     if nextAction is not None:
+                        self.pprevAction = self.prevAction
                         self.prevAction = self.currentAction
                         self.currentAction = nextAction
                 # check whether the traces are visible to the robot.
