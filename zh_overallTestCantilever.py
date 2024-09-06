@@ -333,8 +333,8 @@ while myRobot.cap.isOpened:
             myRobot.isCounting = False
             myRobot.resetFIFO()
             myRobot.switchIMU(False)
-            # myRobot.stopwalknew()
-            myRobot.interrupt()
+            myRobot.stopwalknew()
+            # myRobot.interrupt()
             myRobot.climbDetectedThreshold(val = 10)
             time.sleep(0.5)
             # rlb walk forward 1 step.
@@ -344,9 +344,10 @@ while myRobot.cap.isOpened:
             myRobot.rlbPID()    #mapping yaw to rlb value
             myRobot.rlbControl(val=myRobot.RLB)     #send rlb value to arduino
             myRobot.triangularwalk(myRobot.walkDir, myRobot.walkDis, continuous = False)
-            myRobot.interrupt() #?
+            # myRobot.interrupt() #?
             time.sleep(0.5)
             # walk at low clearance.
+            myRobot.stopClimbingAPI()
             for i in range(6):
                 time.sleep(0.1)
                 myRobot.getPoseFromCircles()
@@ -383,11 +384,12 @@ while myRobot.cap.isOpened:
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
 
-            myRobot.resetIMU()
+            if myRobot.countCrossing == 0:
+                myRobot.resetIMU()
 
             #walk in low clearance
-            myRobot.changeclearance(val=10)
-            for i in range(3):
+            myRobot.changeclearance(val=7.5)
+            for i in range(3):  # default 3.
                 for j in range(8):
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
@@ -398,8 +400,8 @@ while myRobot.cap.isOpened:
             
             #turn to adjust yaw
             time.sleep(1)
-            myRobot.freeturn(-20)  #initially -25
-
+            myRobot.stopClimbingAPI()
+            myRobot.freeturn(-22)  #initially -25
             myRobot.waitGlobalStep()
             myRobot.walkDis = 50  # default 45.
             # myRobot.rlbSetpoint = -10.0  # can be finetuned.
@@ -407,9 +409,11 @@ while myRobot.cap.isOpened:
             myRobot.RLB = 0.0  # default -100
             # start climbing.
             myRobot.kpPitch(val=0.006)
+            '''
             if myRobot.countCrossing == 0:
                 myRobot.discrete_startClimbingAPI()
             myRobot.discrete_startClimbingAPI()
+            '''
             myRobot.startClimbingAPI()
             # lastTurnTime = time.time()
             print("Entering C | rlbSetpoint: {}".format(myRobot.rlbSetpoint))
@@ -529,6 +533,8 @@ while myRobot.cap.isOpened:
             # myRobot.isCounting = False
             # lastTurnTime = time.time() + 5
             myRobot.resetFIFO()
+            if myRobot.countCrossing >= 6:
+                myRobot.walkDis = 50
 
         elif myRobot.currentAction == "V":
             '''
@@ -621,7 +627,8 @@ while myRobot.cap.isOpened:
             
             if myRobot.globalStep >= 1.0:
                 print("dt: {}".format(time.time() - lastTurnTime))
-
+                if myRobot.countCrossing >= 6:
+                    myRobot.changeclearance()
                 if myRobot.isCounting == False:
                     if myRobot.currentAction == 'F' and (time.time() - lastTurnTime >= 8.0):
                         myRobot.isCounting = True

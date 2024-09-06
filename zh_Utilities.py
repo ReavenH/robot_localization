@@ -22,7 +22,16 @@ import cv2
 from scipy.io import savemat, loadmat
 from scipy.spatial import distance
 from collections import deque
+import logging
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("log.txt"),
+        logging.StreamHandler()
+    ]
+)
 
 if platform.system() == "Linux":  # if on raspberry pi
     # instantiate gpio control for the servos.
@@ -533,11 +542,15 @@ class robot():
         # self.path = "GFFFLFFCFPACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer.
         # self.path = "VFLFFFFLFFFFFFLGFS"  # 2nd layer from the 2nd nailing.
         # self.path = "PACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from placing.
-        self.path = "FCFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from climbing.
+        # self.path = "FCFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from climbing.
         # self.path = "FCFVFLFFS"
         # self.path = "FFFFS"
         # self.path = "FLFFS"
         # self.path = "FFCFFFS"
+        # self.path = "FCFVS"
+        # self.path = "FCFFS"
+        # self.path = "FFFFFFFFFFFS"
+        self.path = "CFCFCFFFFFS"
         self.currentAction = self.path[0]
         self.prevAction = "F"
         self.pprevAction = "F"
@@ -648,6 +661,7 @@ class robot():
             print("Leaning Forward.")
         dataCMD = json.dumps({'var':"swing", 'val':offset})  # offset in mm. positive offset -> leaning forward.
         self.ser.write(dataCMD.encode())
+        # logging.info("Swing "+str(offset))
         time.sleep(8)  # wait until finish.
         # change the walk clearance to default.
         # self.changeclearance()
@@ -766,7 +780,10 @@ class robot():
                         print("{} received.".format(ack))
                         break
                 if time.time() - timeSend > wait:
-                    print("Timeout, resending..., received [{}]".format(ack))
+                    if ack:
+                        print("Timeout, resending..., received [{}]".format(ack))
+                    else:
+                        print("Timeout, resending...")
                     self.ser.write(dataCMD.encode())
                     timeSend = time.time()
         if continuous: 
@@ -926,18 +943,25 @@ class robot():
                 timeSend = time.time()
         self.isMoving = False
 
+    def discrete_startClimbingAPI(self):
+        self.climbTest()
+        self.stopwalknew()
+        self.triangularwalk(0, self.walkDis, waitAck=False,continuous=False)
+        self.waitGlobalStep()
+        self.setTargetPitch(dval = 5)
+        self.isClimbing = True
+
     def startClimbingAPI(self):
         self.climbTest()
         self.stopwalknew()
         self.triangularwalk(0, self.walkDis, waitAck=False)
-        self.changeclearance(val=30)
         self.setTargetPitch(dval = 5)
         self.isClimbing = True
 
     def stopClimbingAPI(self):
+        self.climbTest(val=0)   #climbTest should be excuted before stopClimb
         self.stopClimb()
         self.stopwalknew()
-        self.climbTest(val=0)
         self.changeclearance()
         self.switchIMU(False)
         self.isClimbing = False
@@ -1122,7 +1146,7 @@ class robot():
     def resetIMU(self):
         dataCMD = json.dumps({'var': "reset"})
         self.ser.write(dataCMD.encode())
-        print("Reset IMU")
+        print("Resetting IMU...")
         time.sleep(10)
         print("Done.")
         
@@ -1688,8 +1712,9 @@ class robot():
 
     def resetFIFO(self):
         self.prevCrossing = False
-        self.currentCrossing = False
+        self.atCrossing = False
         self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)
+        print("FIFO reset.")
 
     def checkCrossing(self, numTrue = 9, tolerance = 5):
         '''
@@ -2304,6 +2329,7 @@ class robot():
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
         self.pushBrick(27)
+        time.sleep(2)
 
         # return to the normal state
         self.adjustHeight(110)
@@ -2382,12 +2408,12 @@ class robot():
         # time.sleep(1)
 
         self.adjustHeight(90, dis=0.5)  # need change
-        time.sleep(1)
+        time.sleep(2)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
         time.sleep(1)
 
-        self.adjustHeight(80, dis=0.5)  # need change
-        time.sleep(1)
+        self.adjustHeight(70, dis=0.5)  # need change
+        time.sleep(3)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment5"], self.speedNail)  # need change
         time.sleep(1)
 
@@ -2395,14 +2421,14 @@ class robot():
         # time.sleep(1)
 
         self.adjustHeight(90)  # need change
-        time.sleep(1)
+        time.sleep(2)
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
         time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
         time.sleep(1)
 
         self.adjustHeight(100)
-        time.sleep(1)
+        time.sleep(2)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
         time.sleep(1)
 
@@ -2421,13 +2447,13 @@ class robot():
         # time.sleep(1)
 
         # pin down two nails
-        self.pushBrick(-50)
+        self.pushBrick(-48)
         time.sleep(2)
         self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment2"], 1 / 10)  # need change
         time.sleep(1)
         self.adjustHeight(80)
         time.sleep(2)
-        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM3"], 1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM3"], 1 / 2)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
@@ -2435,16 +2461,16 @@ class robot():
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.pushBrick(5)
+        self.pushBrick(8)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM5"], 1)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.pushBrick(20)
+        self.adjustHeight(110)
         time.sleep(1)
         # return to the normal state
-        self.adjustHeight(110)
+        self.pushBrick(15)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)  # changed
         # time.sleep(1)
