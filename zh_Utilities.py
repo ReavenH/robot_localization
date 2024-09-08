@@ -522,22 +522,7 @@ class robot():
         
         # the movement schedular's params.
         # the first will always be F.
-        # self.path = "FFFFLFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
-        # self.path = "FFLFFFLFS"
-        # self.path = "FFFFFLFFFLFFFFFLFFFS"  # for a whole "O" shape.
-        # self.path = "FFS"
-        # self.path = "FLFS"
-        # self.path = "FFFFLFFFS"  # for a 3 layer rectilinear consisted of 7 bricks.
-        # self.path = "FFFFFFFFFFFFFFF" # for a climbing test 
-        # self.path = "FFCFCFFLFFFS"
-        # self.path = "FFFFFLFFFLFFFFFLFFFLS"
-        # self.path = "GFFFLFPS"  # GFF is a whole picking process.
-        # self.path = "GFFFFFFS"
-        # self.path = "GFFFFLFFPS"  # placing the first brick.
-        # self.path = "GFLFFFFFFRPS"  # placing the second brick.
-        # self.path = "FRS"
-        # self.path = "FFLFS"
-        # self.path = "FFLFFCFFLFFS"  # for the new climbing test.
+        # left turn: LF.
         # self.path = "GFFFLFFPACFVFLFFFFLFFFFLGFS"  # 1st brick.
         # self.path = "GFFFLFFCFPACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer.
         # self.path = "VFLFFFFLFFFFFFLGFS"  # 2nd layer from the 2nd nailing.
@@ -550,7 +535,11 @@ class robot():
         # self.path = "FCFVS"
         # self.path = "FCFFS"
         # self.path = "FFFFFFFFFFFS"
-        self.path = "CFCFCFFFFFS"
+        # self.path = "CFCFCFFFFFS"
+        # self.path = "FFLGFFFS"
+        # self.path = "VS"
+        # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFRFFFRFFFLFFFLGFQS"  # 1st and 2nd brick.
+        self.path = "FFLGFQLFFFFFFRPACFVFRFFFRFFFLFFFLGFQS"  # 2nd brick.
         self.currentAction = self.path[0]
         self.prevAction = "F"
         self.pprevAction = "F"
@@ -580,7 +569,7 @@ class robot():
         self.adjustedPose = True
 
         # no. of place bricks.
-        self.countPlaced = 2
+        self.countPlaced = 0
 
         # whether to push brick.
         self.push = True
@@ -788,7 +777,18 @@ class robot():
                     timeSend = time.time()
         if continuous: 
             self.isMoving = True
-        # time.sleep(0.1)
+
+
+    def walkWithVision(self, steps = 1, verbose = False):
+        if verbose: print("Walking with vision.")
+        for i in range(steps):  # default 3.
+            for j in range(8):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+            self.rlbPID()
+            self.rlbControl(val=self.RLB)
+            self.triangularwalk(self.walkDir, distance = self.walkDis - 5, continuous = False)
+            self.waitGlobalStep()
 
     def freeturn(self, degree, wait = 1.5, token = "ActionK: TURNING Once"):
         if self.isMoving == True:
@@ -811,6 +811,74 @@ class robot():
         self.isMoving = False
         self.stopwalknew()
         # time.sleep(0.1)
+
+    def adjustYawByFreeturn(self, target, verbose = True):
+        if verbose: print("adjustYawByFreeturn...")
+        for i in range(6):
+            time.sleep(0.1)
+            self.getPoseFromCircles()
+            # print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
+        while abs(self.bottomLineYawStraight) > target:
+            if self.bottomLineYawStraight > 0:
+                self.freeturn(max(min(self.bottomLineYawStraight*1.5,-7.5),-15))
+                time.sleep(1.2)
+            elif self.bottomLineYawStraight < 0:
+                self.freeturn(min(max(self.bottomLineYawStraight*1.5,7.5),15))
+                time.sleep(1.2)
+            for i in range(6):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                # print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
+    
+    def adjustLateralOffset(self, target, verbose = True):
+        if verbose: print("adjustLateralOffset")
+        for i in range(6):
+            time.sleep(0.2)
+            self.getPoseFromCircles()
+            print("Yaw: {}, lostVision: {}, bottomLineCentroidLL: {}".format(self.bottomLineYawStraight, self.lostVision, self.bottomLineCentroidLL))
+        while abs(self.bottomLineCentroidLL[0]) > target:  # TODO: change to normal centroid.
+            print("Adjusting lateral offset: centroid x is {}".format(self.bottomLineCentroidLL[0]))
+            if self.bottomLineCentroidLL[0] > 0:
+                self.triangularwalk(-90, np.ceil(np.abs(self.bottomLineCentroidLL[0]) / 80 * (18 - 10) + 10), continuous = False)
+                self.waitGlobalStep()
+            elif self.bottomLineCentroidLL[0] < 0:
+                self.triangularwalk(90, np.ceil(np.abs(self.bottomLineCentroidLL[0]) / 80 * (18 - 10) + 10), continuous = False)
+                self.waitGlobalStep()
+            time.sleep(0.1)
+            centroidXAvg = 0.0
+            time.sleep(1)
+            for i in range(6):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                if i >= 4:
+                    centroidXAvg += self.bottomLineCentroidLL[0]
+                    centroidXAvg *= 0.5
+                print("Yaw: {}, lostVision: {}, centroidLL-x {}, Avg X {}".format(self.bottomLineYawStraight, self.lostVision, self.bottomLineCentroidLL[0], centroidXAvg))
+
+    def adjustLateralOffsetLostVision(self, verbose = True):
+        if verbose: print("adjustLateralOffsetLostVision...")
+        for i in range(6):
+            time.sleep(0.1)
+            self.getPoseFromCircles()
+            print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
+        while self.lostVision != 0:
+            print("Adjusting lateral offset: lostVision is {}".format(self.lostVision))
+            if self.lostVision > 0:
+                if self.lostVision == 2:
+                    self.triangularwalk(-90, 10, continuous=False)
+                elif self.lostVision == 1:
+                    self.triangularwalk(-90, 12, continuous=False)
+                self.waitGlobalStep()
+            elif self.lostVision < 0:
+                if self.lostVision == -2:
+                    self.triangularwalk(90, 10, continuous=False)
+                elif self.lostVision == -1:
+                    self.triangularwalk(90, 12, continuous=False)
+                self.waitGlobalStep()
+            for i in range(6):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
 
     def stopwalknew(self, wait = 1.5, token = "FBStop"):
         dataCMD = json.dumps({'var':"move", 'val':3})
@@ -1762,6 +1830,7 @@ class robot():
                 # print("BC:{}".format(self.bottomLineCentroid))
                 self.bottomLineCentroid = (bottomLineCentroid + self.bottomLineCentroid) / 2  # windowing.
                 self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
+                self.bottomLineCentroidLL = bottomLineCentroid
                 if len(self.bottomLineYaw) == 2:
                     bottomLineCentroidCrossing = np.array(self._getManhattanCentroid(ret1[0]))
                     # print("Original BC:{}".format(bottomLineCentroid))
@@ -1769,6 +1838,8 @@ class robot():
                     # print("BC:{}".format(self.bottomLineCentroid))
                     # self.bottomLineCentroidCrossing = (self.bottomLineCentroidCrossing + self.bottomLineCentroidCrossing) / 2  # windowing.
                     # self.walkDir = - 2 * np.arctan2(self.bottomLineCentroidCrossing[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
+                    if ~self.entryDir.any():
+                        self.bottomLineCentroidHL = np.array(self._getManhattanCentroid(ret1[0][~self.entryDir]))
             if bottomLineYaw.all():  # only change the yaw when the detected yaw(s) is legitimate.
                 # self.bottomLineYaw = bottomLineYaw
                 bottomLineYaw *= -1  # the actual direction
@@ -1783,6 +1854,7 @@ class robot():
                         # a vertical line detected.
                         # exploit straight line yaw from it.
                         self.bottomLineYawStraight = np.sign(self.bottomLineYaw) * (np.abs(self.bottomLineYaw) - 90)
+                        self.bottomLineCentroidHL = np.array(self._getManhattanCentroid(ret1[0]))
                         if not rotAid: self._enqueue(True)
                     else:
                         if self.entryDir.any():
@@ -1859,7 +1931,7 @@ class robot():
             time.sleep(0.5)
             self.RPYCtl('yaw', target)
             time.sleep(2)
-            for i in range(6):
+            for i in range(8):
                 time.sleep(0.1)
                 self.getPoseFromCircles()
                 if verbose: print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
@@ -2241,11 +2313,11 @@ class robot():
         # put down two nails
         self.adjustHeight(95)
         time.sleep(1)
-        self.singleServoCtrl(1, self.servoCriticalAngles["gripperAdjustment1"], 1 / 10)  # need change 950
-        time.sleep(1)
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
-        time.sleep(3)
-        self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail)
+        self.singleServoCtrl(1, self.servoCriticalAngles["brickUp"], 1 / 10)  # need change 950
+        time.sleep(1.5)
+        #self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        #time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail * 2)
         time.sleep(1)
         # self.singleServoCtrl(0, 1000, speed_0)
         # time.sleep(1)
@@ -2253,18 +2325,20 @@ class robot():
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment1"], 1 / 10)  # need change 950
         time.sleep(1)
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperMidPoint"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose1"], 1 / 10)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown1"], self.speedNail / 10)  # need change
         time.sleep(1)
 
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
-        time.sleep(2)
+        #self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
+        #time.sleep(2)
         # self.singleServoCtrl(2, 2200, 1 / 10)
         # time.sleep(1)
         # self.singleServoCtrl(2, 2500, 1 / 10)
         # time.sleep(1)
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 20)  # change to 500
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)  # change to 500
         time.sleep(2)
 
         # self.singleServoCtrl(1, 900, 1/10)#need change 950
@@ -2305,7 +2379,7 @@ class robot():
 
         self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment3"], self.speedNail / 10)
         time.sleep(1)
-        self.singleServoCtrl(0, self.servoCriticalAngles["gripperAdjustment2"], self.speedNail / 20)
+        self.singleServoCtrl(0, self.servoCriticalAngles["gripperAdjustment2"], self.speedNail / 10)
         time.sleep(3)
         # self.singleServoCtrl(1, 550, 1/10)#need change 950
         # time.sleep(1)
@@ -2320,15 +2394,16 @@ class robot():
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM4"], 1)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM1"], 1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM5"], 1)
         time.sleep(1)
+        self.pushBrick(-5)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.pushBrick(27)
+        self.pushBrick(32)
         time.sleep(2)
 
         # return to the normal state
@@ -2376,7 +2451,7 @@ class robot():
         # time.sleep(1)
         self.adjustHeight(95)
         # time.sleep(1)
-        self.singleServoCtrl(1, self.servoCriticalAngles["gripperAdjustment1"], 1 / 10)
+        self.singleServoCtrl(1, self.servoCriticalAngles["brickUp"], 1 / 10)
         time.sleep(1)
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
         time.sleep(1)
@@ -2388,13 +2463,15 @@ class robot():
         # time.sleep(1)
         self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"], 1 / 10)  # need change
         time.sleep(1)
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 10)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperMidPoint"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose1"], 1 / 10)
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["brickDown2"], self.speedNail / 10)  # need change
         time.sleep(1)
 
-        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
-        time.sleep(1)
+        # self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose1"], 1 / 2)
+        # time.sleep(1)
         # self.singleServoCtrl(2, 2200, 1 / 10)
         # time.sleep(1)
         # self.singleServoCtrl(2, 2500, 1 / 10)
@@ -2447,11 +2524,13 @@ class robot():
         # time.sleep(1)
 
         # pin down two nails
-        self.pushBrick(-48)
+        self.pushBrick(-28)
         time.sleep(2)
         self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment2"], 1 / 10)  # need change
         time.sleep(1)
         self.adjustHeight(80)
+        time.sleep(5)
+        self.pushBrick(-20)
         time.sleep(2)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM3"], 1 / 2)
         time.sleep(1)
@@ -2461,17 +2540,16 @@ class robot():
         time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
-        self.pushBrick(8)
-        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM5"], 1)
         time.sleep(1)
+        self.pushBrick(-5)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
         time.sleep(2)
+        self.pushBrick(28)
+        time.sleep(1)
         self.adjustHeight(110)
         time.sleep(1)
         # return to the normal state
-        self.pushBrick(15)
-        time.sleep(1)
         self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)  # changed
         # time.sleep(1)
 

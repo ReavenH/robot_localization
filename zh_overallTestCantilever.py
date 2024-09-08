@@ -106,18 +106,20 @@ while myRobot.cap.isOpened:
             myRobot.interrupt()
             myRobot.isCounting = False
             myRobot.resetFIFO()
+            # before using crossing to adjust yaw, let the robot walk forward with visual aid.
+            myRobot.walkWithVision()
             # firstly adjust the lateral offset.
             for i in range(6):
                 time.sleep(0.2)
                 myRobot.getPoseFromCircles()
-                print("Yaw: {}, lostVision: {}, bottomLineCentroidCrossing: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroidCrossing))
-            while abs(myRobot.bottomLineCentroidCrossing[0]) > 10:  # TODO: change to normal centroid.
-                print("Adjusting lateral offset: centroid x is {}".format(myRobot.bottomLineCentroidCrossing[0]))
-                if myRobot.bottomLineCentroidCrossing[0] > 0:
-                    myRobot.triangularwalk(-90, np.ceil(np.abs(myRobot.bottomLineCentroidCrossing[0]) / 80 * (18 - 12) + 12), continuous = False)
+                print("Yaw: {}, lostVision: {}, bottomLineCentroidCrossing: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroid))
+            while abs(myRobot.bottomLineCentroid[0]) > 10:  # TODO: change to normal centroid.
+                print("Adjusting lateral offset: centroid x is {}".format(myRobot.bottomLineCentroid[0]))
+                if myRobot.bottomLineCentroid[0] > 0:
+                    myRobot.triangularwalk(-90, np.ceil(np.abs(myRobot.bottomLineCentroid[0]) / 80 * (18 - 12) + 12), continuous = False)
                     myRobot.waitGlobalStep()
-                elif myRobot.bottomLineCentroidCrossing[0] < 0:
-                    myRobot.triangularwalk(90, np.ceil(np.abs(myRobot.bottomLineCentroidCrossing[0]) / 80 * (18 - 12) + 12), continuous = False)
+                elif myRobot.bottomLineCentroid[0] < 0:
+                    myRobot.triangularwalk(90, np.ceil(np.abs(myRobot.bottomLineCentroid[0]) / 80 * (18 - 12) + 12), continuous = False)
                     myRobot.waitGlobalStep()
                 time.sleep(0.1)
                 centroidXAvg = 0.0
@@ -125,9 +127,9 @@ while myRobot.cap.isOpened:
                     time.sleep(0.1)
                     myRobot.getPoseFromCircles()
                     if i >= 4:
-                        centroidXAvg += myRobot.bottomLineCentroidCrossing[0]
+                        centroidXAvg += myRobot.bottomLineCentroid[0]
                         centroidXAvg *= 0.5
-                    print("Yaw: {}, lostVision: {}, centroid-x {}, Avg X {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroidCrossing[0], centroidXAvg))
+                    print("Yaw: {}, lostVision: {}, centroid-x {}, Avg X {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision, myRobot.bottomLineCentroid[0], centroidXAvg))
 
             # Use rpyPID control to align the body.
             for i in range(6):
