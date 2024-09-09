@@ -12,7 +12,7 @@ pi = pigpio.pi()
 
 os.system("sudo systemctl stop serial-getty@ttyS0.service")
 
-myRobot = robot(hmRPYG, None, None, ser, config="dog3Config.json", vidsrc=0)
+myRobot = robot(hmRPYG, None, None, ser, config="dog1Config.json", vidsrc=0)
 myRobot.initBottomCamera()
 
 timePrev = time.time()
@@ -99,14 +99,6 @@ while myRobot.cap.isOpened:
             for i in range(7):
                 myRobot.waitGlobalStep()
             myRobot.stopwalknew()
-            '''
-            myRobot.triangularwalk(-90, 20, continuous = False)
-            # myRobot.waitGlobalStep()
-            time.sleep(1.1)
-            myRobot.triangularwalk(-90, 20, continuous = False)
-            # myRobot.waitGlobalStep()
-            time.sleep(1.1)
-            '''
             # mediate bias.
             '''
             myRobot.walkWithVision(steps = 1)
@@ -165,14 +157,10 @@ while myRobot.cap.isOpened:
             myRobot.isCounting = False
             myRobot.resetFIFO()
             myRobot.interrupt()
-            # myRobot.singleServoCtrl(0, myRobot.criticalServoAngles['linkageFlat'], 1/5)
             time.sleep(0.7)
             myRobot.triangularwalk(0, 25, continuous = False)
             # myRobot.waitGlobalStep()
             time.sleep(1.8)
-            myRobot.triangularwalk(-90, 25, continuous = False)
-            # myRobot.waitGlobalStep()
-            time.sleep(1.1)
             myRobot.triangularwalk(-90, 25, continuous = False)
             # myRobot.waitGlobalStep()
             time.sleep(1.1)
@@ -226,8 +214,6 @@ while myRobot.cap.isOpened:
             myRobot.globalStep = 1.0
             lastTurnTime = time.time()
             myRobot.interrupt()
-            # myRobot.singleServoCtrl(0, myRobot.criticalServoAngles['linkageUp'], 1/5)
-            time.sleep(0.2)
             myRobot.switchIMU(False)
 
         elif myRobot.currentAction == "G":  
@@ -237,14 +223,10 @@ while myRobot.cap.isOpened:
             myRobot.isCounting = False
             myRobot.stopClimbingAPI()
             myRobot.resetFIFO()
-            # mediate lateral deviation.
-            if myRobot.prevAction == 'L':
-                for i in range(2):
-                    myRobot.triangularwalk(-90, 25, continuous = False)
-                    myRobot.waitGlobalStep()
             # walk with vision.
             myRobot.walkWithVision()
             myRobot.adjustLateralOffsetLostVision()
+            myRobot.discreteTurn(1)                                     #start discrete turn
             myRobot.adjustYawByFreeturn(8)  # use freeturn first.
             # adjust lateral offset.
             # myRobot.adjustLateralOffset(10)      
@@ -255,7 +237,8 @@ while myRobot.cap.isOpened:
             # myRobot.adjustLateralOffset(7) 
             myRobot.adjustLateralOffsetLostVision()
             myRobot.adjustYawByFreeturn(6) 
-            # myRobot.walkWithVision(steps = 2)
+            myRobot.discreteTurn(0)                                     #end discrete turn
+            myRobot.walkWithVision(steps = 2)
             myRobot.RPYCtl('pitch', 0)
             time.sleep(2)
             myRobot.rpyPID(aim=-1, tolerance=1.0)
@@ -737,8 +720,6 @@ while myRobot.cap.isOpened:
                 
             if myRobot.pprevAction == 'D':
                 myRobot.walkDis = 35
-                myRobot.adjustWalkHeight(100)
-                
             
             if myRobot.globalStep >= 1.0:
                 print("dt: {}".format(time.time() - lastTurnTime))
