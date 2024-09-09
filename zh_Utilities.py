@@ -471,8 +471,8 @@ class robot():
             with open(config, 'r', encoding='utf-8') as json_file:
                 self.servoCriticalAngles = json.load(json_file)
                 self.config = self.servoCriticalAngles
-            self.servoDefaultAngles = [self.servoCriticalAngles["linkageFullyUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
-            self.servoAngles = [self.servoCriticalAngles["linkageFullyUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
             # init pins.
             self._servoIOInit(50)
             print("Servos initialized!")
@@ -547,12 +547,11 @@ class robot():
         # self.path = "LS"
         # self.path = "FFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFFLS"
         # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFFRFFFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFLS"  # 3 bricks.
-        # self.path = "FFRFFFFRFFFFLFFLS"
+        # self.path = "FFRFFFFRFFFFLFFLS"             #LRCG add F (not counting)
+        self.path = "FFLGFQFFFLFFPACFVFKFFFFLFF" 
+        
         # self.path = "RS"
         # self.path = "LS"
-        # self.path = "FFRFDFFFRFFFFLFFLS"
-        # self.path = "FFLGFQLFFFFFFRPACFVFFRFFFFRFFFFLS"
-        self.path = "FFRFDFFFRFFFFLS"
         self.currentAction = self.path[0]
         self.prevAction = "F"
         self.pprevAction = "F"
@@ -770,7 +769,7 @@ class robot():
             # linkages up.
             if verbose:
                 print("Linkage Up.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageFullyUp"], 10)
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
 
     def triangularwalk(self, degree, distance=35, wait=2, token = "Action: Triangular Gait", continuous = True, waitAck = True):
         if self.isMoving == False and continuous:
@@ -1129,6 +1128,27 @@ class robot():
             if self.ser.in_waiting > 0:
                 ack = self.ser.readline().decode().strip()
                 ack1 = re.search(r'After Turn', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
+    def discreteTurn(self, val, wait = 1.5):
+        '''
+        Distinct the continuous and discrete turning gait, if value = 1, use discrete turning gait
+        val = 1 for discrete turning. change back to 0 after each discrete turning
+        val = 0 for continuous.
+        '''
+        dataCMD = json.dumps({'var': "DiscreteTurn", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'Discrete Turn', ack)
                 if ack1:
                     print("{} received.".format(ack))
                     break
@@ -1555,22 +1575,6 @@ class robot():
         print("Adjusted height to {}.".format(height))
         # change the walk clearance to default.
         # self.changeclearance()
-
-    def adjustWalkHeight(self, dval, token = "WALK_HEIGHT", wait = 1.5):
-        dataCMD = json.dumps({'var': "AdjustHeight", 'dval': dval})
-        self.ser.write(dataCMD.encode())
-        timeSend = time.time()
-        while True:
-            if self.ser.in_waiting > 0:
-                ack = self.ser.readline().decode().strip()
-                if ack == token:
-                    print("{} received.".format(ack))
-                    break
-            if time.time() - timeSend > wait:
-                print("Timeout, resending...")
-                self.ser.write(dataCMD.encode())
-                timeSend = time.time()
-        print("Adjusted height to {}.".format(dval))
 
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
@@ -2029,7 +2033,7 @@ class robot():
         if verbose: print("PID Done, current yaw is {}".format(self.bottomLineYawStraight))
         self.rpyErrors[1] = 0.0
         
-    def fbPID(self, tolerance = 10, aim = -65, verbose = True):
+    def fbPID(self, tolerance = 10, aim = -55, verbose = True):
         '''
         PID to control the swing before placing.
         '''
