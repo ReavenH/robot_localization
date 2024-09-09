@@ -129,7 +129,12 @@ try:
     while(True):
         #desiredServo = int(input("Input servo No (0=baseBoard, 1=brickBoard, 2=gripperGear)\n"))
         #desiredPWM = int(input("Input desired PWM for Servo {}\n".format(desiredServo)))
-        input_number = int(input("Input the PWM you want\n"))
+        input_number = int(input("Input the PWM you want (999 to exit and shutdown servos)\n"))
+        if input_number == 999:
+            pi.stop()
+            subprocess.Popen(["sudo", "killall", "pigpiod"])
+            print("Program Exited")
+            break
         if input_number == 255:
             placeBrick2()
             continue
@@ -148,5 +153,5 @@ try:
 
 except KeyboardInterrupt:
     pi.stop()
-    subprocess.Popen(["sudo", "killall", "pigpiod"])
+    subprocess.run('sudo killall pigpiod', shell=True, check=True)
     print("Program Exited")

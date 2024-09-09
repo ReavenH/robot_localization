@@ -9,7 +9,7 @@ TODO:
 3. the localization workflow combining both cameras' results (to filter the exact location);
 '''
 
-myRobot = robot(hmRPYG, None, poseTags, None, vidsrc=1)
+myRobot = robot(hmRPYG, None, poseTags, None, config = "dog3Config.json", vidsrc=1)
 myRobot.initBottomCamera()
 
 timePrev = time.time()
