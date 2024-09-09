@@ -1,4 +1,5 @@
 {
+    "dogNo": 3,
     "linkageDown": 1900, 
     "linkageTilt": 1300, 
     "linkageUp": 850, 
@@ -13,7 +14,7 @@
     "gripperLoose": 2450,
     "gripperLoose1": 2500,
     "gripperTight": 500,
-    "gripperAlign": 1850, 
+    "gripperAlign": 1750, 
     "gripperClose": 500,
     "gripperPush": 1750,
     "frameHeight": 240,
@@ -29,7 +30,7 @@
     "smallCirclesParam1": 48,
     "smallCirclesParam2": 19,
     "gripperAdjustment1": 550,
-    "gripperAdjustment2": 510,
+    "gripperAdjustment2": 500,
     "gripperMidPoint": 1000,
     "linkageDown1": 1300,
     "linkageAdjustment1": 850,
