@@ -4,6 +4,7 @@
     "linkageTilt": 1300, 
     "linkageUp": 850, 
     "linkageSlightlyUp": 1050, 
+    "linkageFullyUp": 640,
     "linkageFlat": 950,
     "linkageGuideBrick": 1200,
     "brickDown": 1600, 

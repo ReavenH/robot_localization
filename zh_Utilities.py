@@ -471,8 +471,8 @@ class robot():
             with open(config, 'r', encoding='utf-8') as json_file:
                 self.servoCriticalAngles = json.load(json_file)
                 self.config = self.servoCriticalAngles
-            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
-            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoDefaultAngles = [self.servoCriticalAngles["linkageFullyUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoAngles = [self.servoCriticalAngles["linkageFullyUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
             # init pins.
             self._servoIOInit(50)
             print("Servos initialized!")
@@ -546,8 +546,13 @@ class robot():
         # self.path = "GPS"
         # self.path = "LS"
         # self.path = "FFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFFLS"
-        # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFFRFFFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFFLS"  # 3 bricks.
-        self.path = "FFRFFFFFRFFFFLFFLS"
+        # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFFRFFFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFLS"  # 3 bricks.
+        # self.path = "FFRFFFFRFFFFLFFLS"
+        # self.path = "RS"
+        # self.path = "LS"
+        # self.path = "FFRFDFFFRFFFFLFFLS"
+        # self.path = "FFLGFQLFFFFFFRPACFVFFRFFFFRFFFFLS"
+        self.path = "FFRFDFFFRFFFFLS"
         self.currentAction = self.path[0]
         self.prevAction = "F"
         self.pprevAction = "F"
@@ -765,7 +770,7 @@ class robot():
             # linkages up.
             if verbose:
                 print("Linkage Up.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageFullyUp"], 10)
 
     def triangularwalk(self, degree, distance=35, wait=2, token = "Action: Triangular Gait", continuous = True, waitAck = True):
         if self.isMoving == False and continuous:
@@ -810,7 +815,7 @@ class robot():
             self.triangularwalk(self.walkDir, distance = self.walkDis - 5, continuous = False)
             self.waitGlobalStep()
 
-    def freeturn(self, degree, continuous = True, wait = 1.5, token = "ActionK: TURNING Once"):
+    def freeturn(self, degree, continuous = False, wait = 1.5, token = "ActionK: TURNING Once"):
         '''
         continuous = True means the robot spins in place.
         '''
@@ -943,6 +948,7 @@ class robot():
         '''
         val: 0~30.
         '''
+        print("changeclearance: {}".format(val))
         dataCMD = json.dumps({'var': "ChangeClearance", 'val': val})
         self.ser.write(dataCMD.encode())
         timeSend = time.time()
@@ -1550,6 +1556,22 @@ class robot():
         # change the walk clearance to default.
         # self.changeclearance()
 
+    def adjustWalkHeight(self, dval, token = "WALK_HEIGHT", wait = 1.5):
+        dataCMD = json.dumps({'var': "AdjustHeight", 'dval': dval})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        print("Adjusted height to {}.".format(dval))
+
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
         self.initialEstimate = self.updatedEstimate
@@ -2007,7 +2029,7 @@ class robot():
         if verbose: print("PID Done, current yaw is {}".format(self.bottomLineYawStraight))
         self.rpyErrors[1] = 0.0
         
-    def fbPID(self, tolerance = 10, aim = -55, verbose = True):
+    def fbPID(self, tolerance = 10, aim = -65, verbose = True):
         '''
         PID to control the swing before placing.
         '''

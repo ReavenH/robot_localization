@@ -42,8 +42,8 @@ myRobot.triangularwalk(0, 20)
 myRobot.switchIMU(False)
 
 lastTurnTime = time.time()
-myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageUp"] + 100, 1/2)
-myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageUp"], 1/2)
+myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageFullyUp"] + 100, 1/2)
+myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageFullyUp"], 1/2)
 
 myRobot.countPlaced = 2
 while myRobot.cap.isOpened:
@@ -74,13 +74,40 @@ while myRobot.cap.isOpened:
             lastTurnTime = time.time()
             myRobot.globalStep = 1.0
 
+        elif myRobot.currentAction == 'D':
+            '''
+            Downstairs.
+            '''
+            myRobot.walkDis = 35
+            myRobot.adjustWalkHeight(90)
+            myRobot.updateActionHistory()
+
         elif myRobot.currentAction == 'L':
             myRobot.stopClimbingAPI()
             myRobot.isCounting = False
             myRobot.resetFIFO()
             myRobot.interrupt()
             time.sleep(0.7)
+            myRobot.triangularwalk(0, 20, continuous = False)
+            # myRobot.waitGlobalStep()
+            time.sleep(1.1)
+            myRobot.triangularwalk(90, 20, continuous = False)
+            # myRobot.waitGlobalStep()
+            time.sleep(1.1)
+            myRobot.freeturn(20, continuous = True)
+            for i in range(7):
+                myRobot.waitGlobalStep()
+            myRobot.stopwalknew()
+            '''
+            myRobot.triangularwalk(-90, 20, continuous = False)
+            # myRobot.waitGlobalStep()
+            time.sleep(1.1)
+            myRobot.triangularwalk(-90, 20, continuous = False)
+            # myRobot.waitGlobalStep()
+            time.sleep(1.1)
+            '''
             # mediate bias.
+            '''
             myRobot.walkWithVision(steps = 1)
             myRobot.triangularwalk(90, 20, continuous = False)
             myRobot.waitGlobalStep()
@@ -94,6 +121,7 @@ while myRobot.cap.isOpened:
                 time.sleep(1.7)
                 myRobot.freeturn(25) # default zh_planarWalk1.py0
                 # time.sleep(2.5)
+            '''
             myRobot.updateActionHistory()
             myRobot.globalStep = 1.0
             myRobot.atCrossing = False
@@ -136,11 +164,22 @@ while myRobot.cap.isOpened:
             myRobot.isCounting = False
             myRobot.resetFIFO()
             myRobot.interrupt()
+            # myRobot.singleServoCtrl(0, myRobot.criticalServoAngles['linkageFlat'], 1/5)
             time.sleep(0.7)
+            myRobot.triangularwalk(0, 25, continuous = False)
+            # myRobot.waitGlobalStep()
+            time.sleep(1.8)
+            myRobot.triangularwalk(-90, 25, continuous = False)
+            # myRobot.waitGlobalStep()
+            time.sleep(1.1)
+            myRobot.triangularwalk(-90, 25, continuous = False)
+            # myRobot.waitGlobalStep()
+            time.sleep(1.1)
             # myRobot.walkWithVision(steps = 1)
             # blind turn, wait until globalStep is greater than 1.0
-            myRobot.freeturn(-20)
-            for i in range(14):
+            myRobot.freeturn(-20, continuous = True)
+            n = 15 if myRobot.carryingBrick else 10
+            for i in range(n):
                 myRobot.waitGlobalStep()
             myRobot.stopwalknew()
             '''
@@ -181,11 +220,13 @@ while myRobot.cap.isOpened:
                 myRobot.triangularwalk(0, 35, continuous=False)
                 time.sleep(1.2)
             '''
-            myRobot.walkWithVision(steps = 2)
+            # myRobot.walkWithVision(steps = 2)
             myRobot.updateActionHistory()
             myRobot.globalStep = 1.0
             lastTurnTime = time.time()
             myRobot.interrupt()
+            # myRobot.singleServoCtrl(0, myRobot.criticalServoAngles['linkageUp'], 1/5)
+            time.sleep(0.2)
             myRobot.switchIMU(False)
 
         elif myRobot.currentAction == "G":  
@@ -195,6 +236,11 @@ while myRobot.cap.isOpened:
             myRobot.isCounting = False
             myRobot.stopClimbingAPI()
             myRobot.resetFIFO()
+            # mediate lateral deviation.
+            if myRobot.prevAction == 'L':
+                for i in range(2):
+                    myRobot.triangularwalk(-90, 25, continuous = False)
+                    myRobot.waitGlobalStep()
             # walk with vision.
             myRobot.walkWithVision()
             myRobot.adjustLateralOffsetLostVision()
@@ -208,6 +254,7 @@ while myRobot.cap.isOpened:
             # myRobot.adjustLateralOffset(7) 
             myRobot.adjustLateralOffsetLostVision()
             myRobot.adjustYawByFreeturn(6) 
+            # myRobot.walkWithVision(steps = 2)
             myRobot.RPYCtl('pitch', 0)
             time.sleep(2)
             myRobot.rpyPID(aim=-1, tolerance=1.0)
@@ -686,6 +733,10 @@ while myRobot.cap.isOpened:
             ret = myRobot.getPoseFromCircles(verbose=False, minCircles=5, display=False)
             if ret == None:  # stop the robot if the camera is down.
                 myRobot.currentAction = 'S'
+                
+            if myRobot.pprevAction == 'D':
+                myRobot.walkDis = 35
+                myRobot.adjustWalkHeight(100)
                 
             
             if myRobot.globalStep >= 1.0:
