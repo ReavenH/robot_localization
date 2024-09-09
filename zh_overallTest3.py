@@ -44,8 +44,9 @@ myRobot.switchIMU(False)
 lastTurnTime = time.time()
 myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageFullyUp"] + 100, 1/2)
 myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageFullyUp"], 1/2)
+myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperClose"] + 100, 1/2)
+myRobot.singleServoCtrl(2, myRobot.servoCriticalAngles["gripperClose"] + 100, 1/2)
 
-myRobot.countPlaced = 2
 while myRobot.cap.isOpened:
     try:
         print("isMoving: {} | isClimbing {}, {} | prevCrossing: {} | atCrossing: {} | pprevCrossing: {} | prevAction: {} | currentAction: {} | countCrossing: {} | lostVision: {}".format(myRobot.isMoving, myRobot.isClimbing, myRobot.isClimbing1, myRobot.prevCrossing, myRobot.atCrossing, myRobot.pprevAction, myRobot.prevAction, myRobot.currentAction, myRobot.countCrossing, myRobot.lostVision))
@@ -79,7 +80,7 @@ while myRobot.cap.isOpened:
             Downstairs.
             '''
             myRobot.walkDis = 35
-            myRobot.adjustWalkHeight(90)
+            myRobot.adjustWalkHeight(95)
             myRobot.updateActionHistory()
 
         elif myRobot.currentAction == 'L':
@@ -178,7 +179,7 @@ while myRobot.cap.isOpened:
             # myRobot.walkWithVision(steps = 1)
             # blind turn, wait until globalStep is greater than 1.0
             myRobot.freeturn(-20, continuous = True)
-            n = 15 if myRobot.carryingBrick else 10
+            n = 7 if myRobot.carryingBrick else 10
             for i in range(n):
                 myRobot.waitGlobalStep()
             myRobot.stopwalknew()
@@ -404,7 +405,7 @@ while myRobot.cap.isOpened:
             # use the RPY PID control from the ESP32 to rotate body without moving feet.
             myRobot.brickAlign()
             time.sleep(1.5)
-            myRobot.rpyPID(aim = -2)
+            myRobot.rpyPID(aim = -3)
             myRobot.placeBrickPhase1()
             time.sleep(1)
             if myRobot.countPlaced in [0, 1, 2]:  # default 2.
@@ -417,7 +418,7 @@ while myRobot.cap.isOpened:
             else:
                 # myRobot.pushBrick(-25, verbose = True)
                 myRobot.fbPID()
-            myRobot.rpyPID(aim = -2)
+            myRobot.rpyPID(aim = -3)
             if myRobot.push:
                 myRobot.pushBrick(40, verbose = True)  # default 32
                 time.sleep(4)

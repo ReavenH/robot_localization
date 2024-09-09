@@ -551,8 +551,8 @@ class robot():
         # self.path = "RS"
         # self.path = "LS"
         # self.path = "FFRFDFFFRFFFFLFFLS"
-        # self.path = "FFLGFQLFFFFFFRPACFVFFRFFFFRFFFFLS"
-        self.path = "FFRFDFFFRFFFFLS"
+        self.path = "FFLGFQLFFFFFFRPACFVFFRFDFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRDFFFDFRFFFFLFLS"
+        # self.path = "FFRFDFFFRFFFFLS"
         self.currentAction = self.path[0]
         self.prevAction = "F"
         self.pprevAction = "F"
@@ -2029,7 +2029,7 @@ class robot():
         if verbose: print("PID Done, current yaw is {}".format(self.bottomLineYawStraight))
         self.rpyErrors[1] = 0.0
         
-    def fbPID(self, tolerance = 10, aim = -65, verbose = True):
+    def fbPID(self, tolerance = 10, aim = -75, verbose = True):
         '''
         PID to control the swing before placing.
         '''
