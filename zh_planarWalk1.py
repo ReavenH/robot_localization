@@ -90,7 +90,7 @@ while myRobot.cap.isOpened:
                         break
                     else:
                         continue
-                myRobot.freeturn(35) # default 30
+                myRobot.freeturn(35) # default 3zh_planarWalk1.py0
                 # time.sleep(2.5)
             '''
             # translate to the left for 3 steps.

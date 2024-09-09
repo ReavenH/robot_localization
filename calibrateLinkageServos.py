@@ -153,5 +153,5 @@ try:
 
 except KeyboardInterrupt:
     pi.stop()
-    subprocess.Popen(["sudo", "killall", "pigpiod"])
+    subprocess.run('sudo killall pigpiod', shell=True, check=True)
     print("Program Exited")

@@ -87,10 +87,10 @@ def detect_and_display_circles(frame):
     # Display the processed frame
     cv2.imshow('Detected Circles', frame)
     
-    '''
+    
     while not cv2.waitKey(1) & 0xFF == ord('w'): 
         continue
-    '''
+    
 
     print("-----------------------------------------------------")
 	

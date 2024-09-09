@@ -13,9 +13,9 @@ y = data  # y 坐标是读取的数据
 plt.plot(x, y, marker='o')
 
 # 添加标题和标签
-plt.title('Plot from TXT Data')
-plt.xlabel('Index')
-plt.ylabel('Value')
+plt.title('Positive Crossing Detection Illustration')
+plt.xlabel('Frame Count')
+plt.ylabel('1(Detected)')
 
 # 显示网格
 plt.grid(True)

@@ -3,7 +3,7 @@
 # each column: x, y, z point coords,
 import numpy as np
 import sympy as sp
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import serial
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.distance import cdist
@@ -22,6 +22,16 @@ import cv2
 from scipy.io import savemat, loadmat
 from scipy.spatial import distance
 from collections import deque
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("log.txt"),
+        logging.StreamHandler()
+    ]
+)
 
 if platform.system() == "Linux":  # if on raspberry pi
     # instantiate gpio control for the servos.
@@ -461,8 +471,8 @@ class robot():
             with open(config, 'r', encoding='utf-8') as json_file:
                 self.servoCriticalAngles = json.load(json_file)
                 self.config = self.servoCriticalAngles
-            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
-            self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperLoose"]]
+            self.servoDefaultAngles = [self.servoCriticalAngles["linkageFullyUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoAngles = [self.servoCriticalAngles["linkageFullyUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
             # init pins.
             self._servoIOInit(50)
             print("Servos initialized!")
@@ -480,6 +490,7 @@ class robot():
 
         # store the previous bottom camera poses.
         self.bottomLineCentroid = [0.0, 0.0]
+        self.bottomLineCentroidCrossing = [0.0, 0.0]
         self.bottomLineYaw = np.array([0.0])
         self.bottomLineYawStraight = 0.0  # it only stores the yaw along the forward direction.
         self.walkDir = 0.0  # in degs.
@@ -487,6 +498,8 @@ class robot():
         self.previousCircles = 0
         self.nextCircles = 0
         self.lostVision = 0  # -1 if the traces disappeared on the left, 1 for right.
+        self.lostVisionCrossingY = 0  # minus if lost vision of the crossing on the front.
+        self.lostVisionCrossingX = 0  # minus if lost vision of the crossing on the left.
         self.horizontalLimit = 90 # in pixels, will adjust the dog's position for better visibility if the com exceeds this value.
         self.entryDir = np.array([])
 
@@ -499,9 +512,10 @@ class robot():
         # whether the robot is at a crossing.
         self.atCrossing = False  # True means detects a crossing.
         self.prevCrossing = False  # whether the robot was at a crossing at the previous time step.
-        self.lenFIFO = 25
+        self.lenFIFO = 30
         self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)  # a FIFO window to decide whether the robot is at a crossing based on the proportion. Default length is 17. Length 35 also works.
         self.countCrossing = 0  # to count the number of the crossings that have passed.
+        self.isCounting = True  # True to count.
 
         # the motionController's params.
         self.yawTolerance = 4  # the target range of the freeturn movement.
@@ -510,16 +524,75 @@ class robot():
         
         # the movement schedular's params.
         # the first will always be F.
-        # self.path = "FFFFLFS"  # F: forward; B: backward; L: left turn 90degs; R: right turn 90degs; S: stop.
-        # self.path = "FFLFFFLFS"
-        self.path = "FFFFFLFFFLFFFFFLFFFS"
-        # self.path = "FFS"
-        self.currentAction = "F"
+        # left turn: LF.
+        # self.path = "GFFFLFFPACFVFLFFFFLFFFFLGFS"  # 1st brick.
+        # self.path = "GFFFLFFCFPACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer.
+        # self.path = "VFLFFFFLFFFFFFLGFS"  # 2nd layer from the 2nd nailing.
+        # self.path = "PACFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from placing.
+        # self.path = "FCFVFFLFFFFLFFFFFFLGFS"  # 2nd layer from climbing.
+        # self.path = "FCFVFLFFS"
+        # self.path = "FFFFS"
+        # self.path = "FLFFS"
+        # self.path = "FFCFFFS"
+        # self.path = "FCFVS"
+        # self.path = "FCFFS"
+        # self.path = "FFFFFFFFFFFS"
+        # self.path = "CFCFCFFFFFS"
+        # self.path = "FFLGFFFS"
+        # self.path = "VS"
+        # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFRFFFRFFFFLFFFFLGFQS"  # 1st and 2nd brick.
+        # self.path = "FFLGFQLFFFFFFRPACFVFRFFFRFFFLFFFLGFQS"  # 2nd brick.
+        # self.path = "GPACFVS"
+        # self.path = "GPS"
+        # self.path = "LS"
+        # self.path = "FFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFFLS"
+        # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFFRFFFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFLS"  # 3 bricks.
+        # self.path = "FFRFFFFRFFFFLFFLS"
+        # self.path = "RS"
+        # self.path = "LS"
+        # self.path = "FFRFDFFFRFFFFLFFLS"
+        # self.path = "FFLGFQLFFFFFFRPACFVFFRFFFFRFFFFLS"
+        self.path = "FFRFDFFFRFFFFLS"
+        self.currentAction = self.path[0]
+        self.prevAction = "F"
+        self.pprevAction = "F"
 
         # the right leg bias param.
-        self.rlb = 0.0
-        self.rlbPIDParams = np.array([0.0, 0.0, 0.0])  # the P, I, D parameter for the RLB PID Controller.
+        self.RLB = 0.0
+        self.rlbPIDParams = np.array([0.019, 0.0, 0.0])  # the P=0.013, I, D parameter for the RLB PID Controller.
         self.previous_error = 0.0
+        self.rlbSetpoint = 0.0
+        self.walkDis = 35  # default 35
+        self.executeRLB = True
+        
+        # the yaw RPY control params.
+        self.rpyPIDParams = np.array([1.5, 0.9, 0.0])  # P 1.5, I 0.8, D 0.0 respectively.
+        self.rpyErrors = np.array([0.0, 0.0, 0.0])
+        # The speed of servo 0 when nailing
+        self.speedNail = 1/2
+
+        # the fbPID params.
+        self.fbPIDParams = np.array([0.15, 0.05, 0.0])
+        self.fbErrors = np.array([0.0, 0.0, 0.0])
+        self.accumulatedSwing = 0.0
+
+        # climbing flag.
+        self.isClimbing = False
+        self.isClimbing1 = True
+        self.adjustedPose = True
+
+        # no. of place bricks.
+        self.countPlaced = 0
+
+        # whether carrying a brick.
+        self.carryingBrick = False
+
+        # whether to push brick.
+        self.push = True
+
+        # tell the esp32 the dog number.
+        self._passDogNo()
+        self.withBrick(0)
 
         print("Robot Class initialized!")
         
@@ -552,11 +625,11 @@ class robot():
 
     def resetPose(self):
         self.singleServoCtrl(0, self.servoDefaultAngles[0], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         self.singleServoCtrl(1, self.servoDefaultAngles[1], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         self.singleServoCtrl(2, self.servoDefaultAngles[2], 1/2)
-        time.sleep(0.5)
+        time.sleep(1)
         print("Reset Linkage Pose.")
 
     def openGripper(self):
@@ -567,9 +640,14 @@ class robot():
         print("Close Gripper.")
         self.singleServoCtrl(2, self.servoCriticalAngles["gripperFasten"], 1/2)
 
+    def brickAlign(self):
+        for i in [1, 2]:
+            self.placeBrick(i, verbose=True)
+
     def placeBrickPhase1(self):
         # progress 1~4.
-        for i in [1, 2, 3, 4]:
+        # for i in [1, 2, 3, 4]:
+        for i in [3, 4]:
             self.placeBrick(i, verbose=True)
 
     def placeBrickPhase2(self):
@@ -583,7 +661,8 @@ class robot():
 
     def placeBrickPhase4(self):
         # progress 8~9.
-        for i in [8, 9]:
+        # for i in [8, 9]:
+        for i in [9]:
             self.placeBrick(i, verbose=True)
 
     def pushBrick(self, offset, verbose=False):
@@ -592,6 +671,7 @@ class robot():
             print("Leaning Forward.")
         dataCMD = json.dumps({'var':"swing", 'val':offset})  # offset in mm. positive offset -> leaning forward.
         self.ser.write(dataCMD.encode())
+        # logging.info("Swing "+str(offset))
         time.sleep(8)  # wait until finish.
         # change the walk clearance to default.
         # self.changeclearance()
@@ -606,13 +686,31 @@ class robot():
         # change the walk clearance to default.
         # self.changeclearance()
 
+    def moveLR(self, offset, wait = 1.5):
+        dataCMD = json.dumps({'var': "LRMOVE", 'val': offset})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'LRCOM', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        # self.stopwalknew()
+        self.isMoving = False
+
     def placeBrick(self, progress, verbose=False):
         # primarily called internally by other functions.
         if progress == 1:
             # linkage down.
             if verbose:
                 print("Linkage Tilt.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageTilt"], 1/2)  # default speed is 1/10.
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageTilt"], 2)  # default speed is 1/10.
             time.sleep(0.5)
 
         if progress == 2:
@@ -637,7 +735,7 @@ class robot():
             # linkage down.
             if verbose:
                 print("Linkage Down.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown"], 1/10)  # changed
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown"], 1/30)  # changed
             time.sleep(1)
 
         if progress == 5:
@@ -672,13 +770,18 @@ class robot():
             # linkages up.
             if verbose:
                 print("Linkage Up.")
-            self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 10)
+            self.singleServoCtrl(0, self.servoCriticalAngles["linkageFullyUp"], 10)
 
-    def triangularwalk(self, degree, distance=35, wait=1.5, token = "Action: Triangular Gait", continuous = True):
+    def triangularwalk(self, degree, distance=35, wait=2, token = "Action: Triangular Gait", continuous = True, waitAck = True):
         if self.isMoving == False and continuous:
             print("S->M")
             self.startwalknew()
-        print('T DEG: ',degree,' DIS: ',distance)
+            time.sleep(0.1)
+        if self.isMoving == True and not continuous:
+            print("M->S")
+            self.stopwalknew()
+            time.sleep(0.1)
+        print("Sending:", 'T DEG: ', degree,' DIS: ', distance, 'waitAck', waitAck)
         dataCMD = json.dumps({'var':"TriangularWalk", 'val':degree, 'dis':distance})
         self.ser.write(dataCMD.encode())
         # not necessary to acknowledge when the dog is moving (in the while loop of startwalknew in the ESP32).
@@ -687,21 +790,40 @@ class robot():
             while True:
                 if self.ser.in_waiting > 0:
                     ack = self.ser.readline().decode().strip()
-                    if ack == token:
+                    if (ack == token or re.search(r'Action: Triangular Gait', ack)) or (not waitAck):
                         print("{} received.".format(ack))
                         break
                 if time.time() - timeSend > wait:
-                    print("Timeout, resending...")
+                    if ack:
+                        print("Timeout, resending..., received [{}]".format(ack))
+                    else:
+                        print("Timeout, resending...")
                     self.ser.write(dataCMD.encode())
                     timeSend = time.time()
         if continuous: 
             self.isMoving = True
-        # time.sleep(0.1)
 
-    def freeturn(self, degree, wait = 1.5, token = "ActionK: TURNING Once"):
+
+    def walkWithVision(self, steps = 1, verbose = False):
+        if verbose: print("Walking with vision.")
+        for i in range(steps):  # default 3.
+            for j in range(8):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+            self.rlbPID()
+            self.rlbControl(val=self.RLB)
+            self.triangularwalk(self.walkDir, distance = self.walkDis - 5, continuous = False)
+            self.waitGlobalStep()
+
+    def freeturn(self, degree, continuous = False, wait = 1.5, token = "ActionK: TURNING Once"):
+        '''
+        continuous = True means the robot spins in place.
+        '''
         if self.isMoving == True:
             # self.stopwalknew()
             self.interrupt()
+        if continuous:
+            self.startwalknew()
         print('FT: ', degree)
         dataCMD = json.dumps({'var':"freeturn", 'val':degree})
         self.ser.write(dataCMD.encode())
@@ -716,9 +838,77 @@ class robot():
                 print("Timeout, resending...")
                 self.ser.write(dataCMD.encode())
                 timeSend = time.time()
-        self.isMoving = False
-        self.stopwalknew()
+        # self.isMoving = False
+        # self.stopwalknew()
         # time.sleep(0.1)
+
+    def adjustYawByFreeturn(self, target, verbose = True):
+        if verbose: print("adjustYawByFreeturn...")
+        for i in range(6):
+            time.sleep(0.1)
+            self.getPoseFromCircles()
+            # print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
+        while abs(self.bottomLineYawStraight) > target:
+            if self.bottomLineYawStraight > 0:
+                self.freeturn(max(min(self.bottomLineYawStraight*1.5,-7.5),-15))
+                time.sleep(1.2)
+            elif self.bottomLineYawStraight < 0:
+                self.freeturn(min(max(self.bottomLineYawStraight*1.5,7.5),15))
+                time.sleep(1.2)
+            for i in range(6):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                # print("Yaw: {}, lostVision: {}".format(myRobot.bottomLineYawStraight, myRobot.lostVision))
+    
+    def adjustLateralOffset(self, target, verbose = True):
+        if verbose: print("adjustLateralOffset")
+        for i in range(6):
+            time.sleep(0.2)
+            self.getPoseFromCircles()
+            print("Yaw: {}, lostVision: {}, bottomLineCentroidLL: {}".format(self.bottomLineYawStraight, self.lostVision, self.bottomLineCentroidLL))
+        while abs(self.bottomLineCentroidLL[0]) > target:  # TODO: change to normal centroid.
+            print("Adjusting lateral offset: centroid x is {}".format(self.bottomLineCentroidLL[0]))
+            if self.bottomLineCentroidLL[0] > 0:
+                self.triangularwalk(-90, np.ceil(np.abs(self.bottomLineCentroidLL[0]) / 80 * (18 - 10) + 10), continuous = False)
+                self.waitGlobalStep()
+            elif self.bottomLineCentroidLL[0] < 0:
+                self.triangularwalk(90, np.ceil(np.abs(self.bottomLineCentroidLL[0]) / 80 * (18 - 10) + 10), continuous = False)
+                self.waitGlobalStep()
+            time.sleep(0.1)
+            centroidXAvg = 0.0
+            time.sleep(1)
+            for i in range(6):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                if i >= 4:
+                    centroidXAvg += self.bottomLineCentroidLL[0]
+                    centroidXAvg *= 0.5
+                print("Yaw: {}, lostVision: {}, centroidLL-x {}, Avg X {}".format(self.bottomLineYawStraight, self.lostVision, self.bottomLineCentroidLL[0], centroidXAvg))
+
+    def adjustLateralOffsetLostVision(self, verbose = True):
+        if verbose: print("adjustLateralOffsetLostVision...")
+        for i in range(6):
+            time.sleep(0.1)
+            self.getPoseFromCircles()
+            print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
+        while self.lostVision != 0:
+            print("Adjusting lateral offset: lostVision is {}".format(self.lostVision))
+            if self.lostVision > 0:
+                if self.lostVision == 2:
+                    self.triangularwalk(-90, 10, continuous=False)
+                elif self.lostVision == 1:
+                    self.triangularwalk(-90, 12, continuous=False)
+                self.waitGlobalStep()
+            elif self.lostVision < 0:
+                if self.lostVision == -2:
+                    self.triangularwalk(90, 10, continuous=False)
+                elif self.lostVision == -1:
+                    self.triangularwalk(90, 12, continuous=False)
+                self.waitGlobalStep()
+            for i in range(6):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
 
     def stopwalknew(self, wait = 1.5, token = "FBStop"):
         dataCMD = json.dumps({'var':"move", 'val':3})
@@ -758,6 +948,7 @@ class robot():
         '''
         val: 0~30.
         '''
+        print("changeclearance: {}".format(val))
         dataCMD = json.dumps({'var': "ChangeClearance", 'val': val})
         self.ser.write(dataCMD.encode())
         timeSend = time.time()
@@ -771,6 +962,186 @@ class robot():
                 print("Timeout, resending...")
                 self.ser.write(dataCMD.encode())
                 timeSend = time.time()
+
+    def switchIMU(self, status, wait = 1.5, token = "", var = "IMUoff"):
+        if status == True:
+            var = "IMUon"
+            token = "IMU ON"
+        elif status == False:
+            var = "IMUoff"
+            token = "IMU OFF"
+        dataCMD = json.dumps({'var': var})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
+    def RPYCtl(self, tar, val, dis = 3.0, wait = 1.5):
+        '''
+        Control API for the yaw, roll and pitch.
+        Tar: STRING type, target to choose between "yaw"/"pitch"/"roll".
+        Val: INT type, adjustment in deg. Can be negative.
+        Dis: DOUBLE type, controls the moving speed, the larger the faster, could be decimal.  
+        After using this API, change clearance to 30 before triangular walk.
+        '''
+        dataCMD = json.dumps({'var': "RPY Control", 'tar': tar, 'val': val, 'dis': dis})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'Target', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        # self.stopwalknew()
+        self.isMoving = False
+        
+    def climbTest(self, val = 1, wait = 1.5, token = "Climb Test"):
+        dataCMD = json.dumps({'var': "ClimbTest", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'Climb Test', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.isMoving = False
+
+    def stopClimb(self, wait = 1.5, token = "Stop Climb"):
+        dataCMD = json.dumps({'var': "StopClimb"})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.isMoving = False
+
+    def discrete_startClimbingAPI(self):
+        self.climbTest()
+        self.stopwalknew()
+        self.triangularwalk(0, self.walkDis, waitAck=False,continuous=False)
+        self.waitGlobalStep()
+        self.setTargetPitch(dval = 5)
+        self.isClimbing = True
+
+    def startClimbingAPI(self):
+        self.climbTest()
+        self.stopwalknew()
+        self.triangularwalk(0, self.walkDis, waitAck=False)
+        self.setTargetPitch(dval = 5)
+        self.isClimbing = True
+
+    def stopClimbingAPI(self):
+        self.climbTest(val=0)   #climbTest should be excuted before stopClimb
+        self.stopClimb()
+        self.stopwalknew()
+        self.changeclearance()
+        self.switchIMU(False)
+        self.isClimbing = False
+
+    def kpPitch(self, val = 0.01, wait = 1.5):
+        '''
+        Amplify the pitch value to change sensitivity of IMU.
+        '''
+        dataCMD = json.dumps({'var': "KP Pitch", 'fval': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'KP Pitch', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+      
+    def climbDetectedThreshold(self, val = 5, wait = 1.5):
+        dataCMD = json.dumps({'var': "Climb Detect Threshold", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'Climb Detect Threshold', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+    
+    def _passDogNo(self, wait = 1.5):
+        dataCMD = json.dumps({'var': "DogNum", 'val': self.servoCriticalAngles["dogNo"]})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'DogNum', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
+    def afterTurn(self, val, wait = 1.5):
+        '''
+        Prevent the triangular gait to shake when adjusting position during turning.
+        val = 1 for during turning.
+        val = 0 for finished.
+        '''
+        dataCMD = json.dumps({'var': "AfterTurn", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                ack1 = re.search(r'After Turn', ack)
+                if ack1:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
+    def updateActionHistory(self):
+        self.countCrossing += 1
+        self.pprevAction = self.prevAction
+        self.prevAction = self.currentAction
+        self.currentAction = self.path[self.countCrossing]
 
     def interrupt(self, wait = 1.5, token = "Walk Interrupted"):
         '''
@@ -793,26 +1164,48 @@ class robot():
         self.stopwalknew()
         self.isMoving = False
 
-    def readGlobalStep(self):
+    def readGlobalStep(self, verbose = True):
         value_str = self.ser.readline().decode().strip()
         # print("value_str:", value_str)
         global_step_boolean = re.search(r'Global_Step: (-?\d+\.\d+)', value_str)
+        global_step_boolean1 = re.search(r'1668572516', value_str)  # the flag from ESP.
         if global_step_boolean:
             self.globalStep = float(global_step_boolean.group(1))
+        elif global_step_boolean1 and self.currentAction == "C":
+            self.isCounting = True
+            self.updateActionHistory()
+            print("Step Detected")
+            # walk control.
+            self.walkDis = 40  # default 35
+            # self.rlbSetpoint = -10.0
+            self.RLB = 0
+            self.executeRLB = True
+            self.globalStep = 1.0
+            self.kpPitch(val = 0.1)
+            print("C -> F | rlbSetpoint: {}".format(self.rlbSetpoint))
         else:
             self.globalStep = -1.0
-            print("WARNING: received string \"{}\" is not globalStep".format(value_str))
+            if verbose: print("WARNING: received string \"{}\" is not globalStep".format(value_str))
+
+    def waitGlobalStep(self):
+        while True:
+            self.readGlobalStep()
+            if self.globalStep >= 1.0:
+                break
+            else:
+                continue
 
     def schedular(self):
         '''
         input: self.countCrossings, self.path
         output: action to take.
         '''
-        # if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
-        if self.atCrossing and (self.prevCrossing == False):
+        if self.atCrossing and (self.prevCrossing == False) and (self.isMoving):
+        # if self.atCrossing and (self.prevCrossing == False):
             self.countCrossing += 1
-
-        return self.path[self.countCrossing]
+            return self.path[self.countCrossing]
+        else:
+            return None
 
     def rlbPID(self):
         '''
@@ -822,13 +1215,15 @@ class robot():
         output: self.RLB (float, the rlb value to the ESP32).
         return: NO RETURN VALUE.
         '''
-        my_yaw = self.bottomLineYawStraight
+        if not self.executeRLB:
+            return
+        
+        my_yaw = 0 if abs(self.bottomLineYawStraight) <= 3 else self.bottomLineYawStraight
         Kp,Ki,Kd = self.rlbPIDParams
         integral = 0.0
-        setpoint = 0.0 
 
         # Calculate the error
-        error = setpoint - my_yaw
+        error = self.rlbSetpoint - my_yaw
 
         # Proportional term
         P_out = Kp * error
@@ -842,13 +1237,33 @@ class robot():
         D_out = Kd * derivative
 
         # PID output
-        self.RLB = max(-0.2,min(P_out + I_out + D_out,0.2))
+        self.RLB = 1000*max(-0.2,min(P_out + I_out + D_out,0.2))
 
         # Update previous error
         self.previous_error = error
 
         return self.RLB
-        
+    
+    def rlbControl(self, val, wait = 1.5):
+        dataCMD = json.dumps({'var': "RLB", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                searchResult = re.search(r'RLB Bias', ack)
+                if searchResult != None:
+                    valAck = re.search(r'RLB Bias: (-?\d+\.\d+)', ack)
+                    if valAck:
+                        valAck = float(valAck.group(1))
+                        print("RLB {} received.".format(valAck))
+                        # if valAck == int(val / 10)/100:
+                        break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+
     def buzzer(self, val):
         '''
         val: True (On) or False (Off)
@@ -864,9 +1279,57 @@ class robot():
         else:
             print("\nERROR: invalid logic value for the buzzer.\n")
 
-    def buzzerPWM(self, val):
-        dataCMD = json.dumps({'var': "buzzerPWM", 'val': val})
+    def resetIMU(self):
+        dataCMD = json.dumps({'var': "reset"})
         self.ser.write(dataCMD.encode())
+        print("Resetting IMU...")
+        time.sleep(10)
+        print("Done.")
+        
+    def withBrick(self, val, wait = 1.5):
+        '''
+        tell the ESP whether there is a brick. for gait modes.
+        val: 1 for with a brick; 0 for without any brick.
+        '''
+        dataCMD = json.dumps({'var': "WithBrick", 'val': val})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                searchResult = re.search(r'WITH BRICK', ack)
+                if searchResult != None:
+                    valAck = re.search(r'WITH BRICK: (-?\d+\.\d+)', ack)
+                    if valAck:
+                        valAck = float(valAck.group(1))
+                        print("WITH BRICK: {} received.".format(valAck))
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        self.carryingBrick = bool(val)
+
+    def setTargetPitch(self, dval = 0, wait = 1.5):
+        dataCMD = json.dumps({'var': "TargetPitch", 'dval': dval})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                searchResult = re.search(r'target pitch', ack)
+                if searchResult != None:
+                    valAck = re.search(r'target pitch: (-?\d+\.\d+)', ack)
+                    if valAck:
+                        valAck = float(valAck.group(1))
+                        print("target pitch: {} received.".format(valAck))
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
 
     def feetPosControl(self, positionMatrix):
         '''
@@ -1092,6 +1555,22 @@ class robot():
         print("Adjusted height to {}.".format(height))
         # change the walk clearance to default.
         # self.changeclearance()
+
+    def adjustWalkHeight(self, dval, token = "WALK_HEIGHT", wait = 1.5):
+        dataCMD = json.dumps({'var': "AdjustHeight", 'dval': dval})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        print("Adjusted height to {}.".format(dval))
 
     def poseUpdate(self):
         # TODO: implement EKF. For now, finish a demo to update pose based on pseudo control.
@@ -1384,39 +1863,31 @@ class robot():
         '''
         return list(queue)
 
-    def checkCrossing(self, numTrue = 8, tolerance = 2):
+    def resetFIFO(self):
+        self.prevCrossing = False
+        self.atCrossing = False
+        self.atCrossingFIFO = deque([False]*self.lenFIFO, maxlen=self.lenFIFO)
+        print("FIFO reset.")
+
+    def checkCrossing(self, numTrue = 9, tolerance = 5):
         '''
         Check whether there is a crossing based on the FIFO.
+        numTrue default is 8.
         '''
         listFIFO = list(self.atCrossingFIFO)
         countTrue = sum(listFIFO[-numTrue:])
         countTolerance = sum(listFIFO[:-numTrue])
         # if all(listFIFO[-numTrue:]) and (not any(listFIFO[:-numTrue])): # detect the rising edge.
-        if (countTrue >= 4) and (countTolerance <= tolerance):  # detect the rising edge with tolerance.
+        if (countTrue >= 6) and (countTolerance <= tolerance):  # detect the rising edge with tolerance.
             self.prevCrossing = self.atCrossing
             self.atCrossing = True
             # print("P:{}, C:{}".format(self.prevCrossing, self.atCrossing))
-        elif countTrue == 0 and countTolerance <= 4:
+        elif countTrue == 0 and countTolerance <= 1:  # default 4.
             self.prevCrossing = self.atCrossing
             self.atCrossing = False
         print("sum FIFO: {} | tolerance: {} | numTrue: {}".format(np.sum(listFIFO), countTolerance, countTrue))
-        '''
-        elif all(listFIFO[:numTrue]) and (not any(listFIFO[numTrue:])):
-            print("2")
-            self.prevCrossing = self.atCrossing
-            self.atCrossing = False
-        '''
 
-        '''
-        if sum(listFIFO) < len(listFIFO) // 2:
-            self.prevCrossing = self.atCrossing
-            self.atCrossing = False
-        elif sum(listFIFO) >= len(listFIFO) // 2:
-            self.prevCrossing = self.atCrossing
-            self.atCrossing = True
-        '''
-
-    def getPoseFromCircles(self, minCircles = 4, verbose=False, display=False):  # default minCircles is 5.
+    def getPoseFromCircles(self, minCircles = 5, verbose=False, display=False, rotAid = False):  # default minCircles is 5.
         '''
         To detect the circle patterns on the bricks for EACH FRAME.
         Input: config params (minCircles means the frame will be dumped if there are 
@@ -1430,7 +1901,7 @@ class robot():
             return None
         
         ret1 = self._detectCircles(frame.copy(), minCircles=minCircles, display=display)
-        retSmall = self._detectSmallDots(frame.copy(), verbose=verbose)
+        # retSmall = self._detectSmallDots(frame.copy(), verbose=verbose)
 
         # process the large circle traces.
         if ret1 != None:
@@ -1438,37 +1909,59 @@ class robot():
             # print("bottomLineYaw: {}".format(bottomLineYaw))
             # compute the straight line manhattan centroid
             if self.entryDir.any():
-                bottomLineCentroid = self._getManhattanCentroid(ret1[0][self.entryDir])
+                bottomLineCentroid = np.array(self._getManhattanCentroid(ret1[0][self.entryDir]))
+                # print("Original BC:{}".format(bottomLineCentroid))
                 self.bottomLineCentroid = bottomLineCentroid - np.array(self.bottomCamRes) / 2
-                self.bottomLineCentroid = (self.bottomLineCentroid + bottomLineCentroid) / 2  # windowing.
+                # print("BC:{}".format(self.bottomLineCentroid))
+                self.bottomLineCentroid = (bottomLineCentroid + self.bottomLineCentroid) / 2  # windowing.
                 self.walkDir = - 2 * np.arctan2(self.bottomLineCentroid[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
+                self.bottomLineCentroidLL = bottomLineCentroid
+                if len(self.bottomLineYaw) == 2:
+                    bottomLineCentroidCrossing = np.array(self._getManhattanCentroid(ret1[0]))
+                    # print("Original BC:{}".format(bottomLineCentroid))
+                    self.bottomLineCentroidCrossing = bottomLineCentroidCrossing - np.array(self.bottomCamRes) / 2
+                    self.lostVisionCrossing = 0
+                    # print("BC:{}".format(self.bottomLineCentroid))
+                    # self.bottomLineCentroidCrossing = (self.bottomLineCentroidCrossing + self.bottomLineCentroidCrossing) / 2  # windowing.
+                    # self.walkDir = - 2 * np.arctan2(self.bottomLineCentroidCrossing[0], self.denoConst) * 180 / np.pi  # pay attention to the camera's orientation.
+                    if ~self.entryDir.any():
+                        self.bottomLineCentroidHL = np.array(self._getManhattanCentroid(ret1[0][~self.entryDir]))
+                else:
+                    self.lostVisionCrossingY = np.sign(self.bottomLineCentroidCrossing[1]) * 1  # negative if disappeard on the front.
+                    self.lostVisionCrossingX = np.sign(self.bottomLineCentroidCrossing[0]) * 1  # negative if disappeard on the left.
             if bottomLineYaw.all():  # only change the yaw when the detected yaw(s) is legitimate.
                 # self.bottomLineYaw = bottomLineYaw
                 bottomLineYaw *= -1  # the actual direction
                 self.bottomLineYaw = bottomLineYaw
                 # determine if the robot detects a crossing.
                 if len(self.bottomLineYaw) == 2: 
-                    self._enqueue(True)
-                    # select one yaw from the two detected value.
-                    # bottomLineYaw = bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
-                    # bottomLineYaw = np.sign(bottomLineYaw) * np.abs(bottomLineYaw)
-                    # self.bottomLineYawStraight = bottomLineYaw
+                    if not rotAid: self._enqueue(True)
                     self.bottomLineYawStraight = self.bottomLineYaw[np.argmin(np.abs(bottomLineYaw))]
+
                 elif len(self.bottomLineYaw) == 1:
                     if abs(self.bottomLineYaw) >= 50:
                         # a vertical line detected.
-                        self._enqueue(True)
+                        # exploit straight line yaw from it.
+                        self.bottomLineYawStraight = np.sign(self.bottomLineYaw) * (np.abs(self.bottomLineYaw) - 90)
+                        self.bottomLineCentroidHL = np.array(self._getManhattanCentroid(ret1[0]))
+                        if not rotAid: self._enqueue(True)
                     else:
                         if self.entryDir.any():
                             self.bottomLineYawStraight = self.bottomLineYaw[0]
-                        self._enqueue(False)
+                        if not rotAid: self._enqueue(False)
                 # prevent datatype errors.
                 if isinstance(self.bottomLineYawStraight, (int, float)) != True:
                         self.bottomLineYawStraight = self.bottomLineYawStraight[0]
-                # check if there is a crossing, with a time window.
-                self.checkCrossing()
-                # determine the current action to take.
-                self.currentAction = self.schedular()
+                # to block out counting at some cases. e.g. climbing.
+                if self.isCounting:
+                    # check if there is a crossing, with a time window.
+                    self.checkCrossing()
+                    # determine the current action to take.
+                    nextAction = self.schedular()
+                    if nextAction is not None:
+                        self.pprevAction = self.prevAction
+                        self.prevAction = self.currentAction
+                        self.currentAction = nextAction
                 # check whether the traces are visible to the robot.
                 if np.abs(self.bottomLineCentroid[0]) < self.horizontalLimit:
                     self.lostVision = 0
@@ -1478,7 +1971,7 @@ class robot():
                     else:
                         self.lostVision = 2
             # else:
-            if (not bottomLineYaw.all()) or (not self.entryDir.any()):
+            if (not bottomLineYaw.all()) or ((not self.entryDir.any()) and self.currentAction == 'F'):
                 # print("bottomLineYaw: {}, self.entryDir: {}".format(bottomLineYaw, entryDir))
                 if self.bottomLineCentroid[0] < 0:
                     self.lostVision = -1
@@ -1486,9 +1979,14 @@ class robot():
                     self.lostVision = 1
             if verbose: print("Manhattan Centroid: [{:.2f}, {:.2f}] | walkDir: {} | yaw(s): {}\n".format(self.bottomLineCentroid[0], self.bottomLineCentroid[1], self.walkDir, self.bottomLineYaw))
             # return [self.bottomLineCentroid, self.bottomLineYaw]
+
+            return self.bottomLineYawStraight, self.bottomLineCentroid, self.bottomLineCentroidCrossing, self.lostVision
+        
         else:
             print("ret1 is {}.".format(ret1))
-
+            return 1
+        
+        '''
         # process the small dot patterns.
         if retSmall != None:
             # print("retSmall[1]: ", retSmall[1])
@@ -1500,10 +1998,65 @@ class robot():
             else:
                 # more the 1 dot detected.
                 self._groupCircles(retSmall[0], retSmall[1])
+        '''
+
         # else:
             # if nothing in the current frame return the previous result.
             # return [self.bottomLineCentroid, self.bottomLineYaw]
 
+        # return self.bottomLineYawStraight, self.bottomLineCentroid
+
+    def rpyPID(self, tolerance = 0.5, aim = 0, verbose = True):
+        for i in range(6):  # to get the right pose.
+            time.sleep(0.1)
+            self.getPoseFromCircles()
+            if verbose: print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
+        self.rpyErrors[0] = aim - self.bottomLineYawStraight
+        if self.lostVision not in [0, 2, -2]:
+            self.rpyErrors[1] = 0.0  # clear Error I when there is no vision.
+        while abs(self.rpyErrors[0]) > tolerance:  # the limit should be tuned. in degrees.
+            target = np.dot(self.rpyErrors, self.rpyPIDParams.T)
+            print("rpyPID running... Current Error {}, target adjustment {}, lostVision {}".format(self.rpyErrors, target, self.lostVision))
+            time.sleep(0.5)
+            self.RPYCtl('yaw', target)
+            time.sleep(2)
+            for i in range(8):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                if verbose: print("Yaw: {}, lostVision: {}".format(self.bottomLineYawStraight, self.lostVision))
+            self.rpyErrors[1] += self.rpyErrors[0] 
+            self.rpyErrors[0] = aim - self.bottomLineYawStraight
+        if verbose: print("PID Done, current yaw is {}".format(self.bottomLineYawStraight))
+        self.rpyErrors[1] = 0.0
+        
+    def fbPID(self, tolerance = 10, aim = -65, verbose = True):
+        '''
+        PID to control the swing before placing.
+        '''
+        self.accumulatedSwing = 0.0
+        for i in range(8):  # to get the right pose.
+            time.sleep(0.1)
+            self.getPoseFromCircles()
+            if verbose: print("Crossing Centroid Y: {}, lostVision: {}".format(self.bottomLineCentroidCrossing[1], self.lostVision))
+        self.fbErrors[0] = aim - self.bottomLineCentroidCrossing[1]
+        if self.lostVision not in [0, 2, -2]:
+            self.fbErrors[1] = 0.0
+        while abs(self.fbErrors[0]) > tolerance:
+            target = np.floor(np.clip(np.dot(self.fbErrors, self.fbPIDParams.T), -5, 5))
+            print("FB PID Running ... Current Error {}, target adjustment: {}, lostVision".format(self.fbErrors, target, self.lostVision))
+            self.accumulatedSwing += target
+            if abs(self.accumulatedSwing) >= 32:
+                self.fbErrors[1] = 0.0
+                break
+            self.pushBrick(target, verbose=True)
+            # time.sleep(2.5)
+            for i in range(8):
+                time.sleep(0.1)
+                self.getPoseFromCircles()
+                if verbose: print("Crossing Centroid Y: {}, lostVision: {}".format(self.bottomLineCentroidCrossing[1], self.lostVision))
+            self.fbErrors[1] += self.fbErrors[0]
+            self.fbErrors[0] = aim - self.bottomLineCentroidCrossing[1]
+        if verbose: print("PID Done, current centroid Y is {}".format(self.bottomLineCentroidCrossing[1]))
 
     def measurementUpdate(self, results, useCalibration = True):
         # handle multiple tags: tags -> poses from each tag -> elimitate the craziest one -> average over the rest.
@@ -1631,6 +2184,482 @@ class robot():
         brickPoseBodyFrame = np.array([0, 0, 0, 0, 0, 0])  # ignore the actuation mechanism.
         poseProposal = (self.hm(*self.updatedEstimate[:3], self.updatedEstimate[3:])).dot(brickPoseBodyFrame)
 
+    # by Haocheng Peng 8.24
+    # The next three functions are used to get the distance between two lines and get the yaw of the second line
+    # If you want  to use it the only thing you need to input is the frame
+
+    # get the slope and intercept
+    def _calculate_slope_intercept(self, x1, y1, x2, y2):
+        if x2 == x1:  # avoid dividing zero
+            raise ValueError("The line is vertical, slope is undefined.")
+        slope = (y2 - y1) / (x2 - x1)
+        intercept = y1 - slope * x1
+        return slope, intercept
+
+    # fit the line
+    def _fit_line(self, points):
+        A = np.vstack([points[:, 0], np.ones(len(points))]).T
+        m, c = np.linalg.lstsq(A, points[:, 1], rcond=None)[0]
+        return m, c
+
+    def get_distance_between_two_lines(self, image):
+
+        yaw = 0
+        distance = 0
+        lines = []
+        height, width = image.shape[:2]
+
+        # get the middle 1/3 area
+        middle_start = width // 3
+        middle_end = 2 * width // 3
+
+        # get the lower part
+        down_height_start = height // 2
+        down_height_end = 5 * height // 6
+
+        cut_image = image[down_height_start:down_height_end, middle_start:middle_end]
+
+        # change to gray map
+        gray = cv2.cvtColor(cut_image, cv2.COLOR_BGR2GRAY)
+
+
+        # use hough circles to detect circles
+        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20,
+                                   param1=50, param2=30, minRadius=5, maxRadius=25)
+
+        points = []
+        # if we get circles
+        if circles is not None:
+            circles = np.round(circles[0, :]).astype("int")
+
+            # sort using the x labels
+            circles = sorted(circles, key=lambda c: c[0])
+
+            # detect the circles in a straight line
+            for i in range(len(circles)):
+                for j in range(i + 1, len(circles) - 1):
+                    for z in range(i + 2, len(circles)):
+                        # if x is close it is vertical line
+                        if abs(circles[i][0] - circles[j][0]) < 10 and abs(circles[j][0] - circles[z][0]) < 10:
+                            lines.append(((circles[i][0], circles[i][1]), (circles[j][0], circles[j][1])))
+                            lines.append(((circles[j][0], circles[j][1]), (circles[z][0], circles[z][1])))
+                            # label them
+                            # cv2.circle(cut_image, (circles[i][0], circles[i][1]), circles[i][2], (0, 255, 0), 2)
+                            # cv2.circle(cut_image, (circles[j][0], circles[j][1]), circles[j][2], (0, 255, 0), 2)
+                            # cv2.line(cut_image, (circles[i][0], circles[i][1]), (circles[j][0], circles[j][1]), (255, 0, 0), 2)
+        else:
+            return 0,0
+        # change to numpy array
+        lines = np.array(lines)
+
+        # get all points
+        all_points = []
+        for line in lines:
+            all_points.extend(line)
+        all_points = np.array(all_points)
+
+        # fit line
+        m, c = self._fit_line(all_points)
+
+        # get the start and end points from the fit line
+        x_values = np.array([min(all_points[:, 0]), max(all_points[:, 0])])
+        y_values = m * x_values + c
+        start_point = [int(x_values[0]), int(y_values[0])]
+        end_point = [int(x_values[1]), int(y_values[1])]
+
+        # print(start_point)
+        # print it
+        # cv2.line(cut_image, start_point, end_point, (0, 255, 255), 2)
+
+        '''
+        # use the adjustable windows to display image
+        window_name = 'Detected Line'
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)  
+
+       
+        cv2.resizeWindow(window_name, 800, 600) 
+
+        
+        cv2.moveWindow(window_name, 100, 100) 
+
+        
+        cv2.imshow(window_name, cut_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        '''
+
+        cut_image = cv2.cvtColor(cut_image, cv2.COLOR_BGR2GRAY)
+
+        height_cut, width_cut = cut_image.shape[:2]
+
+        cx, cy = width_cut // 2, 0
+
+        # print("origin point is: ", cx,cy)
+
+        # use canny edge detection
+        edges = cv2.Canny(cut_image, 50, 150)
+
+        # use hough transformation to detect lines
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=20, minLineLength=50, maxLineGap=10)
+
+        # draw lines on the image
+        output = cv2.cvtColor(cut_image, cv2.COLOR_GRAY2BGR)
+
+        # set the threshold for the image
+        vertical_threshold = 40
+        # just need one line
+        count = 0
+
+        # limit the length first line's y
+        if start_point[1] < 200:
+            start_point[1] = 200
+
+        if end_point[1] < 200:
+            end_point[1] = 200
+
+        x1_rel1, y1_rel1 = start_point[0] - cx, start_point[1] - cy
+        x2_rel1, y2_rel1 = end_point[0] - cx, end_point[1] - cy
+        # draw the first line
+        cv2.line(output, start_point, end_point, (0, 255, 255), 2)
+        # print("first line x: ",start_point[0],end_point[0])
+        # print("first line y: ",start_point[1],end_point[1])
+        # get the slope and intercept
+        slope1, intercept1 = self._calculate_slope_intercept(x1_rel1, y1_rel1, x2_rel1, y2_rel1)
+        # print(f"Slope of first line: {slope1}")
+        # print(f"Intercept of first line: {intercept1}")
+
+        if lines is not None:
+            for line in lines:
+
+                x1, y1, x2, y2 = line[0]
+                # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                if abs(x2 - x1) < vertical_threshold:  # 如果x坐标差值小于阈值，则认为是竖直线段
+                    # print the possible first line for test
+                    # cv2.line(output, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+                    # print("y: ",y1,y2)
+                    # print("x: ",x1,x2)
+                    # cv2.line(output, start_point, end_point, (0, 255, 255), 2)
+                    # print(start_point[1],end_point[1])
+
+                    # if the middle point of second line is approximately above the first line, it is the wanted line
+                    # if they are almost on the same line, then the second line will not return, and the result will be 0 for distance and yaw
+                    if (start_point[1] + end_point[1] - y1 - y2) > 480 and (abs(x1 - start_point[0])) < 250 and (
+                    abs(x1 - start_point[0])) > 20 and count < 1:
+                        cv2.line(output, (x1, y1), (x2, y2), (0, 255, 0), 2)  # 绘制竖直线段
+                        x1_rel2, y1_rel2 = x1 - cx, y1 - cy
+                        x2_rel2, y2_rel2 = x2 - cx, y2 - cy
+                        # print("second line x: ", x1,x2)
+                        # print("second line y: ",y1,y2)
+                        slope2, intercept2 = self._calculate_slope_intercept(x1_rel2, y1_rel2, x2_rel2, y2_rel2)
+                        # print(f"Slope of second line: {slope2}")
+                        # print(f"Intercept of second line: {intercept2}")
+
+                        # print("The x distance between two lines are: ", (start_point[0] + end_point[0]) / 2 - (x1 + x2) / 2)
+
+                        # if the second line is on the right side of the first line, it is negative. Otherwise, it is positive
+                        distance = (start_point[0] + end_point[0]) / 2 - (x1 + x2) / 2
+
+                        # calculate the degree
+                        theta = np.degrees(np.arctan(slope2))
+
+                        # change the degree to
+                        theta = theta - 90
+                        theta = np.clip(theta, -180, 180)
+
+                        if (theta < -90):
+                            theta = theta + 180
+
+                        if (theta > 90):
+                            theta = theta - 180
+
+                        # negative means on the left side, positive means on the right side
+                        yaw = theta
+                        # print(f"Yaw angle: {theta} degrees")
+
+                        count += 1
+        else:
+            return 0,0
+        # it will return the distance and yaw
+        return distance, yaw
+
+    # By Haocheng Peng, pin down two nails under the second layer
+    def two_nails(self):
+        '''
+        Pin down the two nails.
+        '''
+
+        # buzzer control.
+        self.buzzer(True)
+        time.sleep(0.5)
+        self.buzzer(False)
+
+        # servo control.
+        # self.resetPose()
+        # time.sleep(1)
+
+        # grasping the brick.
+        # put down two nails
+        self.adjustHeight(95)
+        time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["brickUp"], 1 / 10)  # need change 950
+        time.sleep(1.5)
+        #self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        #time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail * 2)
+        time.sleep(1)
+        # self.singleServoCtrl(0, 1000, speed_0)
+        # time.sleep(1)
+        # self.singleServoCtrl(0, 1300, speed_0)
+        # time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment1"], 1 / 10)  # need change 950
+        time.sleep(1)
+        #self.singleServoCtrl(2, self.servoCriticalAngles["gripperMidPoint"], 1)
+        #time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose1"], 1 / 10)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["brickDown1"], self.speedNail / 10)  # need change
+        time.sleep(1)
+
+        #self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose"], 1 / 2)
+        #time.sleep(2)
+        # self.singleServoCtrl(2, 2200, 1 / 10)
+        # time.sleep(1)
+        # self.singleServoCtrl(2, 2500, 1 / 10)
+        # time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperMidPoint"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)  # change to 500
+        time.sleep(2)
+
+        # self.singleServoCtrl(1, 900, 1/10)#need change 950
+        # time.sleep(1)
+        # self.pushBrick(-5)
+        # time.sleep(1)
+
+        self.adjustHeight(90, dis=0.5)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment1"], self.speedNail)
+        time.sleep(1)
+
+        self.adjustHeight(80, dis=0.5)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment2"], self.speedNail)
+        time.sleep(1)
+
+        # self.singleServoCtrl(1, 800, 1/10)#need change 950
+        # time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment1"], self.speedNail)
+        time.sleep(1)
+        self.adjustHeight(90)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment3"], self.speedNail)
+        time.sleep(1)
+        self.adjustHeight(100)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.adjustHeight(110)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment3"], self.speedNail / 10)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["gripperAdjustment2"], self.speedNail / 10)
+        time.sleep(3)
+        # self.singleServoCtrl(1, 550, 1/10)#need change 950
+        # time.sleep(1)
+
+        # pin down two nails
+        self.pushBrick(-27)
+        self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment1"], 1 / 10)
+        time.sleep(1)
+        self.adjustHeight(80)
+        time.sleep(5)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM3"], 1 / 2)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM4"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM5"], 1)
+        time.sleep(1)
+        self.pushBrick(-5)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.pushBrick(32)
+        time.sleep(2)
+
+        # return to the normal state
+        self.adjustHeight(110)
+        time.sleep(3)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)
+        time.sleep(1)
+
+        self.resetPose()
+
+
+    def two_nails_on_board(self):
+
+        '''
+        Pin down the latter two nails.
+        '''
+
+        # buzzer control.
+        self.buzzer(True)
+        time.sleep(0.5)
+        self.buzzer(False)
+
+        # servo control.
+        # self.resetPose()
+        # time.sleep(1)
+
+        # grasping the brick.
+        # put down two nails
+
+        '''
+        self.stopwalknew()
+        self.triangularwalk(0, distance=0)
+        self.changeclearance(0)
+        self.interrupt()
+        '''
+        self.buzzer(True)
+        time.sleep(0.5)
+        self.buzzer(False)
+        
+        # self.rpyPID(aim=-1, tolerance=1.0)
+        # self.stopwalknew()
+        print('start pushing')
+        self.pushBrick(25, verbose=True)
+        # self.stopwalknew()
+        # time.sleep(1)
+        self.adjustHeight(95)
+        # time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["brickUp"], 1 / 10)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["linkageDown1"], self.speedNail)
+        time.sleep(1)
+        # self.singleServoCtrl(0, 1000, speed_0)
+        # time.sleep(1)
+        # self.singleServoCtrl(0, 1300, speed_0)
+        # time.sleep(1)
+        self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"], 1 / 10)  # need change
+        time.sleep(1)
+        #self.singleServoCtrl(2, self.servoCriticalAngles["gripperMidPoint"], 1)
+        #time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose1"], 1 / 10)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["brickDown2"], self.speedNail / 10)  # need change
+        time.sleep(1)
+
+        # self.singleServoCtrl(2, self.servoCriticalAngles["gripperLoose1"], 1 / 2)
+        # time.sleep(1)
+        # self.singleServoCtrl(2, 2200, 1 / 10)
+        # time.sleep(1)
+        # self.singleServoCtrl(2, 2500, 1 / 10)
+        # time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperMidPoint"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        # self.singleServoCtrl(1, 900, 1/10)#need change 950
+        # time.sleep(1)
+        # self.pushBrick(-5)
+        # time.sleep(1)
+
+        self.adjustHeight(90, dis=0.5)  # need change
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
+        time.sleep(1)
+
+        self.adjustHeight(70, dis=0.5)  # need change
+        time.sleep(3)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment5"], self.speedNail)  # need change
+        time.sleep(1)
+
+        # self.singleServoCtrl(1, 800, 1/10)
+        # time.sleep(1)
+
+        self.adjustHeight(90)  # need change
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment4"], self.speedNail)  # need change
+        time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.adjustHeight(100)
+        time.sleep(2)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment6"], 1 / 5)  # need change
+        time.sleep(1)
+        # self.adjustHeight(100)  # default 110.
+        # time.sleep(1)
+        # self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment7"], 1 / 35)
+        # time.sleep(1)
+        self.singleServoCtrl(2, self.servoCriticalAngles["gripperAdjustment2"], 1 / 10)
+        time.sleep(1)
+
+        '''
+        self.pushBrick(-5)
+        self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"] - 65, 1/30)
+        time.sleep(0.5)
+        self.pushBrick(-5)
+        self.singleServoCtrl(1, self.servoCriticalAngles["linkageAdjustment2"] - 130, 1/30)
+        time.sleep(0.5)
+        '''
+
+        self.singleServoCtrl(0, self.servoCriticalAngles["servoAdjustment7"], 1 / 35)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["linkageUp"], 1 / 30)
+        time.sleep(1)
+        # self.singleServoCtrl(1, 550, 1/10)#need change 950
+        # time.sleep(1)
+
+        # pin down two nails
+        self.pushBrick(-28)
+        # self.pushBrick(-18)
+        time.sleep(2)
+        self.singleServoCtrl(1, self.servoCriticalAngles["pinDownAdjustment2"], 1 / 10)  # need change
+        time.sleep(1)
+        self.adjustHeight(80)
+        time.sleep(5)
+        self.pushBrick(-20)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM3"], 1 / 2)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM4"], 1)
+        time.sleep(1)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM5"], 1)
+        time.sleep(1)
+        self.pushBrick(-5)
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 8)
+        time.sleep(2)
+        self.pushBrick(28)
+        time.sleep(1)
+        self.adjustHeight(110)
+        time.sleep(1)
+        # return to the normal state
+        self.singleServoCtrl(0, self.servoCriticalAngles["pinDownPWM2"], 1 / 10)  # changed
+        # time.sleep(1)
+
+        self.resetPose()
+        # self.RPYCtl('yaw', 0)
 
 class brickMap():
     def __init__(self, hm, ax) -> None:
