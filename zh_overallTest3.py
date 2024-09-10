@@ -239,7 +239,9 @@ while myRobot.cap.isOpened:
             myRobot.adjustYawByFreeturn(6) 
             myRobot.discreteTurn(0)                                     #end discrete turn
             myRobot.walkWithVision(steps = 2)
+            myRobot.stopwalknew()
             myRobot.RPYCtl('pitch', 0)
+
             time.sleep(2)
             myRobot.rpyPID(aim=-1, tolerance=1.0)
 
