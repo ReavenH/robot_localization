@@ -45,7 +45,7 @@ lastTurnTime = time.time()
 myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageUp"] + 100, 1/2)
 myRobot.singleServoCtrl(0, myRobot.servoCriticalAngles["linkageUp"], 1/2)
 
-myRobot.countPlaced = 2
+myRobot.countPlaced = 1
 while myRobot.cap.isOpened:
     try:
         print("isMoving: {} | isClimbing {}, {} | prevCrossing: {} | atCrossing: {} | pprevCrossing: {} | prevAction: {} | currentAction: {} | countCrossing: {} | lostVision: {}".format(myRobot.isMoving, myRobot.isClimbing, myRobot.isClimbing1, myRobot.prevCrossing, myRobot.atCrossing, myRobot.pprevAction, myRobot.prevAction, myRobot.currentAction, myRobot.countCrossing, myRobot.lostVision))
@@ -236,7 +236,9 @@ while myRobot.cap.isOpened:
             myRobot.adjustYawByFreeturn(6) 
             myRobot.discreteTurn(0)                                     #end discrete turn
             myRobot.walkWithVision(steps = 2)
+            myRobot.stopwalknew()
             myRobot.RPYCtl('pitch', 0)
+
             time.sleep(2)
             myRobot.rpyPID(aim=-1, tolerance=1.0)
 

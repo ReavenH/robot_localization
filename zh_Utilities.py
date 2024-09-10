@@ -548,8 +548,12 @@ class robot():
         # self.path = "FFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFFLS"
         # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFFRFFFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFLS"  # 3 bricks.
         # self.path = "FFRFFFFRFFFFLFFLS"             #LRCG add F (not counting)
-        self.path = "FFLGFQFFFLFFPACFVFKFFFFLFF" 
-        
+        self.path = "FFLGFQFFFLFFPACFVFKFFFFLFF"    #1st brick
+        # self.path = "GS"
+        # self.path = "LS"
+        # self.path = "PS"   
+        # self.path = "QS"  
+
         # self.path = "RS"
         # self.path = "LS"
         self.currentAction = self.path[0]
