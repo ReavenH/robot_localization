@@ -1210,6 +1210,22 @@ class robot():
             self.globalStep = -1.0
             if verbose: print("WARNING: received string \"{}\" is not globalStep".format(value_str))
 
+    def adjustWalkHeight(self, dval, token = "WALK_HEIGHT", wait = 1.5):
+        dataCMD = json.dumps({'var': "AdjustHeight", 'dval': dval})
+        self.ser.write(dataCMD.encode())
+        timeSend = time.time()
+        while True:
+            if self.ser.in_waiting > 0:
+                ack = self.ser.readline().decode().strip()
+                if ack == token:
+                    print("{} received.".format(ack))
+                    break
+            if time.time() - timeSend > wait:
+                print("Timeout, resending...")
+                self.ser.write(dataCMD.encode())
+                timeSend = time.time()
+        print("Adjusted height to {}.".format(dval))
+
     def waitGlobalStep(self):
         while True:
             self.readGlobalStep()

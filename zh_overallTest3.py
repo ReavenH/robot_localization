@@ -65,7 +65,7 @@ while myRobot.cap.isOpened:
             myRobot.isCounting = False
             myRobot.buzzer(True)
             myRobot.brickAlign()
-            time.sleep(1.2)  # default 4.5
+            time.sleep(2.2)  # default 4.5
             myRobot.buzzer(False)
             myRobot.singleServoCtrl(1, myRobot.servoCriticalAngles['brickUp'], 1/10)
             time.sleep(0.5)
@@ -96,7 +96,7 @@ while myRobot.cap.isOpened:
             # myRobot.waitGlobalStep()
             time.sleep(1.1)
             myRobot.freeturn(20, continuous = True)
-            for i in range(7):
+            for i in range(6):
                 myRobot.waitGlobalStep()
             myRobot.stopwalknew()
             # mediate bias.
