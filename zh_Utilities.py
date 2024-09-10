@@ -471,7 +471,7 @@ class robot():
             with open(config, 'r', encoding='utf-8') as json_file:
                 self.servoCriticalAngles = json.load(json_file)
                 self.config = self.servoCriticalAngles
-            self.servoDefaultAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
+            self.servoDefaultAngles = [self.servoCriticalAngles["linkageFullyUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
             self.servoAngles = [self.servoCriticalAngles["linkageUp"], self.servoCriticalAngles["brickUp"], self.servoCriticalAngles["gripperTight"]]
             # init pins.
             self._servoIOInit(50)
@@ -548,12 +548,12 @@ class robot():
         # self.path = "FFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFFLS"
         # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFFFFLGFQLFFFFFFRPACFVFFRFFFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRFFFFRFFFFLFLS"  # 3 bricks.
         # self.path = "FFRFFFFRFFFFLFFLS"             #LRCG add F (not counting)
-        self.path = "FFLGFQFFFLFFPACFVFKFFFFLFF" 
+        # self.path = "FFLGFQFFFLFFPACFVFKFFFFLFF" 
         
         # self.path = "RS"
         # self.path = "LS"
         # self.path = "FFRFDFFFRFFFFLFFLS"
-        self.path = "FFLGFQLFFFFFFRPACFVFFRFDFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRDFFFDFRFFFFLFLS"
+        self.path = "FFLGFQLFFFFFFRPACFVFFRFDFFFRFFFFLFFLGFQLFFFFFFRCFPACFVFRDFFFDFRFFFFLFLS"  # 2 and 3 brick.
         # self.path = "FFRFDFFFRFFFFLS"
         self.currentAction = self.path[0]
         self.prevAction = "F"

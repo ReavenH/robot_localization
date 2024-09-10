@@ -12,7 +12,7 @@ pi = pigpio.pi()
 
 os.system("sudo systemctl stop serial-getty@ttyS0.service")
 
-myRobot = robot(hmRPYG, None, None, ser, config="dog1Config.json", vidsrc=0)
+myRobot = robot(hmRPYG, None, None, ser, config="dog3Config.json", vidsrc=0)
 myRobot.initBottomCamera()
 
 timePrev = time.time()
